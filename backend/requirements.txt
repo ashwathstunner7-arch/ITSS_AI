@@ -12,3 +12,5 @@ pyyaml
 google-generativeai
 python-dotenv
 openai
+pymysql
+cryptography

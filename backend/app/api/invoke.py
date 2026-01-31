@@ -23,10 +23,24 @@ async def invoke_ai(request: schemas.InvokeRequest, db: Session = Depends(get_db
     db.add(user_msg)
     
     # 3. Fetch Rules and Construct System Prompt
-    active_rules = db.query(models.Rule).filter(models.Rule.enabled == True).all()
-    system_instructions = "\n".join([f"- {r.title}: {r.description}" for r in active_rules])
+    system_instructions = ""
+    if request.rules_applied:
+        active_rules = db.query(models.Rule).filter(models.Rule.id.in_(request.rules_applied)).all()
+        if active_rules:
+            import os
+            rules_content_list = []
+            for r in active_rules:
+                file_path = f"rules_storage/rule_{r.id}.md"
+                if os.path.exists(file_path):
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        rules_content_list.append(f.read())
+                else:
+                    rules_content_list.append(f"### {r.title}\n{r.description}")
+            
+            rules_text = "\n\n---\n\n".join(rules_content_list)
+            system_instructions = f"Follow these rules strictly:\n\n{rules_text}\n\n"
     
-    full_prompt = f"Follow these rules:\n{system_instructions}\n\nUser: {request.message}"
+    full_prompt = f"{system_instructions}User: {request.message}"
     
     # 4. Get AI Response
     # Fetch history for context

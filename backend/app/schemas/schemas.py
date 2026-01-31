@@ -5,15 +5,29 @@ from typing import List, Optional
 class RuleBase(BaseModel):
     title: str
     description: str
-    enabled: bool = True
-    type: str
+    rule_content: Optional[str] = None
+    created_by: Optional[str] = None
+    status: str = "active"
+    version: Optional[str] = None
+    category: Optional[str] = None
+    priority: Optional[str] = "medium"
 
 class RuleCreate(RuleBase):
     pass
 
+class RuleUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    rule_content: Optional[str] = None
+    status: Optional[str] = None
+    version: Optional[str] = None
+    category: Optional[str] = None
+    priority: Optional[str] = None
+
 class Rule(RuleBase):
     id: int
     created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -27,6 +41,7 @@ class MessageCreate(MessageBase):
 
 class Message(MessageBase):
     id: int
+    chat_id: int
     created_at: datetime
 
     class Config:

@@ -36,22 +36,26 @@ import Login from './pages/Login'
 
 // Rename old App to Chatbot
 function Chatbot() {
+  const [user, setUser] = useState(null)
   const [messages, setMessages] = useState([])
-  // ... existing state ...
   const [input, setInput] = useState('')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isRulesPanelOpen, setIsRulesPanelOpen] = useState(false)
+  const [isTaggingRulesOpen, setIsTaggingRulesOpen] = useState(false)
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [activeChatId, setActiveChatId] = useState(null)
   const [conversations, setConversations] = useState([])
   const [rules, setRules] = useState([])
+  const [attachedRules, setAttachedRules] = useState([])
   const [attachments, setAttachments] = useState([])
   const [editingChatId, setEditingChatId] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [activeCode, setActiveCode] = useState(null)
   const [isCodePanelOpen, setIsCodePanelOpen] = useState(false)
+  const [isAddRuleModalOpen, setIsAddRuleModalOpen] = useState(false)
+  const [newRule, setNewRule] = useState({ title: '', category: 'logic', description: '', rule_content: '' })
 
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
@@ -82,9 +86,19 @@ function Chatbot() {
 
   // Initial Fetch
   useEffect(() => {
+    fetchUserData()
     fetchRules()
     fetchChats()
   }, [])
+
+  const fetchUserData = async () => {
+    try {
+      const response = await api.get('/auth/me')
+      setUser(response.data)
+    } catch (error) {
+      console.error("Failed to fetch user data:", error)
+    }
+  }
 
   const fetchRules = async () => {
     try {
@@ -92,9 +106,6 @@ function Chatbot() {
       setRules(response.data)
     } catch (error) {
       console.error("Failed to fetch rules:", error)
-      // if (error.response?.status === 401) {
-      //   window.location.href = '/login'
-      // }
     }
   }
 
@@ -136,6 +147,18 @@ function Chatbot() {
     setAttachments(prev => prev.filter(a => a.id !== id))
   }
 
+  const toggleAttachedRule = (ruleId) => {
+    setAttachedRules(prev =>
+      prev.includes(ruleId)
+        ? prev.filter(id => id !== ruleId)
+        : [...prev, ruleId]
+    )
+  }
+
+  const removeAttachedRule = (ruleId) => {
+    setAttachedRules(prev => prev.filter(id => id !== ruleId))
+  }
+
   const fetchChatMessages = async (chatId) => {
     try {
       const response = await api.get(`/chats/${chatId}`)
@@ -144,6 +167,13 @@ function Chatbot() {
     } catch (error) {
       console.error("Failed to fetch chat messages:", error)
     }
+  }
+
+  const handleNewChat = () => {
+    setActiveChatId(null)
+    setMessages([])
+    setAttachedRules([])
+    setAttachments([])
   }
 
   const handleSend = async () => {
@@ -170,6 +200,7 @@ function Chatbot() {
       attachments: attachmentsData,
       timestamp: new Date()
     }
+
     setMessages(prev => [...prev, newMessage])
     setInput('')
     setAttachments([])
@@ -179,69 +210,35 @@ function Chatbot() {
       const response = await api.post('/invoke', {
         message: finalPrompt,
         chat_id: activeChatId,
-        rules_applied: rules.filter(r => r.enabled).map(r => r.id),
+        rules_applied: attachedRules,
         provider: selectedModel.provider,
         model: selectedModel.id
       })
 
-      const botMsg = {
+      const botMessage = {
         id: response.data.id,
         role: 'bot',
         content: response.data.content,
-        timestamp: new Date(response.data.created_at)
+        timestamp: response.data.created_at
       }
 
-      setMessages(prev => [...prev, botMsg])
+      setMessages(prev => [...prev, botMessage])
 
-      // Auto-detect code in bot message for side panel
-      const codeMatch = response.data.content.match(/```(?:\w+)?\n([\s\S]*?)```/)
-      if (codeMatch) {
-        setActiveCode(codeMatch[1])
-        setIsCodePanelOpen(true)
-      }
-
-      if (!activeChatId) {
+      if (!activeChatId && response.data.chat_id) {
+        setActiveChatId(response.data.chat_id)
         fetchChats()
       }
     } catch (error) {
-      console.error("AI Error:", error)
-      const errorMsg = {
-        id: Date.now(),
-        role: 'bot',
-        content: "Sorry, I encountered an error connecting to the AI backend.",
-        timestamp: new Date()
-      }
-      setMessages(prev => [...prev, errorMsg])
+      console.error("Failed to send message:", error)
     } finally {
       setIsLoading(false)
     }
   }
 
-  const toggleRule = async (id, enabled) => {
-    const ruleToUpdate = rules.find(r => r.id === id)
-    if (!ruleToUpdate) return
-
-    try {
-      const response = await api.patch(`/rules/${id}`, {
-        ...ruleToUpdate,
-        enabled: !enabled
-      })
-      setRules(rules.map(rule => rule.id === id ? response.data : rule))
-    } catch (error) {
-      console.error("Failed to toggle rule:", error)
-    }
-  }
-
-  const handleNewChat = () => {
-    setMessages([])
-    setActiveChatId(null)
-  }
-
   const handleLogout = () => {
     localStorage.removeItem('token')
     delete api.defaults.headers.common['Authorization']
-    // window.location.href = '/login'
-    setIsRulesPanelOpen(false) // Just close panel for now since we skip login
+    window.location.href = '/login'
   }
 
   const handleDeleteChat = async (e, chatId) => {
@@ -279,10 +276,42 @@ function Chatbot() {
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
-    alert("Copied to clipboard!")
+  }
+
+  const toggleRule = async (id, currentStatus) => {
+    try {
+      const newStatus = currentStatus === 'active' ? 'inactive' : 'active'
+      await api.patch(`/rules/${id}`, { status: newStatus })
+      setRules(rules.map(r => r.id === id ? { ...r, status: newStatus } : r))
+    } catch (error) {
+      console.error("Failed to toggle rule:", error)
+    }
+  }
+
+  const handleAddRule = async () => {
+    if (!newRule.title.trim() || !newRule.rule_content.trim()) return
+    try {
+      const response = await api.post('/rules', newRule)
+      setRules([...rules, response.data])
+      setNewRule({ title: '', category: 'logic', description: '', rule_content: '' })
+      setIsAddRuleModalOpen(false)
+    } catch (error) {
+      console.error("Failed to add rule:", error)
+    }
+  }
+
+  const handleDeleteRule = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this rule? This will also remove the generated .md file.")) return
+    try {
+      await api.delete(`/rules/${id}`)
+      setRules(rules.filter(r => r.id !== id))
+    } catch (error) {
+      console.error("Failed to delete rule:", error)
+    }
   }
 
   const MessageContent = ({ content }) => {
+    if (!content) return null
     const parts = content.split(/(```[\s\S]*?```)/g)
     return (
       <div className="message-content">
@@ -384,10 +413,6 @@ function Chatbot() {
               <Layout size={16} />
               {isSidebarOpen && <span>Rule Management</span>}
             </div>
-            <div className="conv-item" onClick={handleLogout}>
-              <Settings size={16} />
-              {isSidebarOpen && <span>Logout</span>}
-            </div>
           </div>
         </div>
 
@@ -396,13 +421,22 @@ function Chatbot() {
             <div className="avatar">
               <User size={20} />
             </div>
-            {isSidebarOpen && (
+            {isSidebarOpen && user && (
               <div className="user-info">
-                <span className="user-name">Ashwanth</span>
-                <span className="user-status">Online</span>
+                <span className="user-name">{user.username}</span>
+                <span className="user-status">{user.emailaddress || 'Online'}</span>
               </div>
             )}
-            {isSidebarOpen && <Settings size={18} className="settings-icon" />}
+            <div className="profile-actions">
+              {isSidebarOpen && <span className="rule-access-badge">{user?.ruleaccess}</span>}
+              <button
+                className="logout-icon-btn"
+                title="Logout"
+                onClick={handleLogout}
+              >
+                <X size={18} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -490,6 +524,22 @@ function Chatbot() {
         </div>
 
         <footer className="chat-input-container">
+          {attachedRules.length > 0 && (
+            <div className="attached-rules-bar fade-in">
+              {attachedRules.map(ruleId => {
+                const rule = rules.find(r => r.id === ruleId)
+                return (
+                  <div key={ruleId} className="attached-rule-tag">
+                    <Tag size={12} />
+                    <span>{rule?.title}</span>
+                    <button onClick={() => removeAttachedRule(ruleId)}>
+                      <X size={10} />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="attachments-preview-bar glass fade-in">
               {attachments.map(file => (
@@ -536,6 +586,42 @@ function Chatbot() {
                       <Monitor size={18} />
                       <span>Select Workspace Folder</span>
                     </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="tag-rules-wrapper">
+                <button
+                  className={`input-action-btn ${isTaggingRulesOpen ? 'active' : ''} ${attachedRules.length > 0 ? 'has-rules' : ''}`}
+                  onClick={() => setIsTaggingRulesOpen(!isTaggingRulesOpen)}
+                  title="Attach Rules"
+                >
+                  <Tag size={20} />
+                </button>
+
+                {isTaggingRulesOpen && (
+                  <div className="rules-tag-dropdown glass fade-in">
+                    <div className="dropdown-header">
+                      <span>Select Rules to Apply</span>
+                      <button onClick={() => setIsTaggingRulesOpen(false)}><X size={14} /></button>
+                    </div>
+                    <div className="rules-scrollable">
+                      {rules.map(rule => (
+                        <button
+                          key={rule.id}
+                          className={`rule-select-item ${attachedRules.includes(rule.id) ? 'selected' : ''}`}
+                          onClick={() => toggleAttachedRule(rule.id)}
+                        >
+                          <div className="rule-item-check">
+                            {attachedRules.includes(rule.id) ? <Check size={14} /> : <div className="dot" />}
+                          </div>
+                          <div className="rule-item-info">
+                            <span className="rule-title">{rule.title}</span>
+                            <span className="rule-type">{rule.category} v{rule.version}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -646,32 +732,113 @@ function Chatbot() {
 
               <div className="rules-list">
                 {rules.map(rule => (
-                  <div key={rule.id} className={`rule-card glass ${rule.enabled ? 'enabled' : ''}`}>
+                  <div key={rule.id} className={`rule-card glass ${rule.status === 'active' ? 'enabled' : ''}`}>
                     <div className="rule-info">
                       <div className="rule-header">
                         <h4>{rule.title}</h4>
-                        <span className={`rule-badge ${rule.type}`}>{rule.type}</span>
+                        <span className={`rule-badge ${rule.category}`}>{rule.category}</span>
                       </div>
                       <p>{rule.description}</p>
                     </div>
                     <div className="rule-action">
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={rule.enabled}
-                          onChange={() => toggleRule(rule.id, rule.enabled)}
-                        />
-                        <span className="slider"></span>
-                      </label>
+                      {user?.ruleaccess?.toLowerCase() === 'admin' ? (
+                        <div className="admin-actions">
+                          <button
+                            className="rule-icon-btn delete"
+                            title="Delete Rule"
+                            onClick={() => handleDeleteRule(rule.id)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                          <label className="switch">
+                            <input
+                              type="checkbox"
+                              checked={rule.status === 'active'}
+                              onChange={() => toggleRule(rule.id, rule.status)}
+                            />
+                            <span className="slider"></span>
+                          </label>
+                        </div>
+                      ) : (
+                        <span className={`status-badge ${rule.status}`}>
+                          {rule.status === 'active' ? 'Enabled' : 'Disabled'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
 
-              <button className="add-rule-btn glass">
-                <Plus size={18} />
-                <span>Add New Rule (Feature coming soon)</span>
+              {user?.ruleaccess?.toLowerCase() === 'admin' && (
+                <button className="add-rule-btn glass" onClick={() => setIsAddRuleModalOpen(true)}>
+                  <Plus size={18} />
+                  <span>Add New Rule</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Rule Modal */}
+      {isAddRuleModalOpen && (
+        <div className="panel-overlay" onClick={() => setIsAddRuleModalOpen(false)}>
+          <div className="rules-panel add-rule-modal glass fade-in" onClick={e => e.stopPropagation()}>
+            <div className="panel-header">
+              <div className="header-title">
+                <Plus className="accent-icon" size={24} />
+                <h2>Create Custom Rule</h2>
+              </div>
+              <button className="close-btn" onClick={() => setIsAddRuleModalOpen(false)}>
+                <X size={24} />
               </button>
+            </div>
+
+            <div className="panel-content">
+              <div className="form-group">
+                <label>Title</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Python Specialist"
+                  value={newRule.title}
+                  onChange={e => setNewRule({ ...newRule, title: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Category</label>
+                <select
+                  value={newRule.category}
+                  onChange={e => setNewRule({ ...newRule, category: e.target.value })}
+                >
+                  <option value="logic">Logic</option>
+                  <option value="style">Style</option>
+                  <option value="security">Security</option>
+                  <option value="infrastructure">Infrastructure</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Short Description</label>
+                <input
+                  type="text"
+                  placeholder="Brief objective of the rule"
+                  value={newRule.description}
+                  onChange={e => setNewRule({ ...newRule, description: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Rule Content (Markdown format instructions)</label>
+                <textarea
+                  placeholder="Detailed AI instructions..."
+                  rows={6}
+                  value={newRule.rule_content}
+                  onChange={e => setNewRule({ ...newRule, rule_content: e.target.value })}
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button className="cancel-btn" onClick={() => setIsAddRuleModalOpen(false)}>Cancel</button>
+                <button className="save-rule-btn" onClick={handleAddRule}>Save Rule & Generate MD</button>
+              </div>
             </div>
           </div>
         </div>
@@ -681,8 +848,7 @@ function Chatbot() {
 }
 
 function App() {
-  // const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'))
-  const [isAuthenticated, setIsAuthenticated] = useState(true)
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'))
 
   const handleLogin = () => {
     setIsAuthenticated(true)
