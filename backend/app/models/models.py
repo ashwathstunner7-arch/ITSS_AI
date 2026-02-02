@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.core.database import Base
@@ -38,6 +38,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True, index=True)
     role = Column(String(50)) # 'user' or 'bot'
     content = Column(Text)
+    attachments = Column(JSON) # Store as JSON
     created_at = Column(DateTime, default=datetime.utcnow)
     chat_id = Column(Integer, ForeignKey("chats.id"))
 

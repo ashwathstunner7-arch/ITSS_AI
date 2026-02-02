@@ -35,6 +35,7 @@ class Rule(RuleBase):
 class MessageBase(BaseModel):
     role: str
     content: str
+    attachments: Optional[List[dict]] = None
 
 class MessageCreate(MessageBase):
     chat_id: int
@@ -68,5 +69,6 @@ class InvokeRequest(BaseModel):
     message: str
     chat_id: Optional[int] = None
     rules_applied: List[int] = []
+    attachments: Optional[List[dict]] = None
     provider: Optional[str] = "gemini"
     model: Optional[str] = None

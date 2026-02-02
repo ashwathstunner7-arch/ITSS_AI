@@ -12,6 +12,8 @@ import {
   Image as ImageIcon,
   Folder,
   Monitor,
+  Mic,
+  MicOff,
   FileText,
   Trash2,
   Paperclip,
@@ -21,7 +23,7 @@ import {
   ChevronDown,
   Code,
   Layout,
-  Tag,
+  ShieldCheck,
   Edit2,
   Check,
   Copy,
@@ -30,6 +32,11 @@ import {
 import Editor from '@monaco-editor/react'
 import api from './services/api'
 import './App.css'
+
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './pages/Login'
@@ -44,6 +51,7 @@ function Chatbot() {
   const [isTaggingRulesOpen, setIsTaggingRulesOpen] = useState(false)
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
+  const [isListening, setIsListening] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [activeChatId, setActiveChatId] = useState(null)
   const [conversations, setConversations] = useState([])
@@ -56,6 +64,11 @@ function Chatbot() {
   const [isCodePanelOpen, setIsCodePanelOpen] = useState(false)
   const [isAddRuleModalOpen, setIsAddRuleModalOpen] = useState(false)
   const [newRule, setNewRule] = useState({ title: '', category: 'logic', description: '', rule_content: '' })
+  const [sidebarWidth, setSidebarWidth] = useState(280)
+  const [codePanelWidth, setCodePanelWidth] = useState(450)
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false)
+  const [isResizingCodePanel, setIsResizingCodePanel] = useState(false)
+  const [sidebarCollapsedWidth, setSidebarCollapsedWidth] = useState(80)
 
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
@@ -143,6 +156,43 @@ function Chatbot() {
     setIsAttachmentMenuOpen(false)
   }
 
+  const handleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      alert("Your browser does not support voice recognition.")
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = false
+    recognition.interimResults = false
+
+    recognition.onstart = () => {
+      setIsListening(true)
+    }
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript
+      setInput(prev => prev ? `${prev} ${transcript}` : transcript)
+      setIsListening(false)
+    }
+
+    recognition.onerror = (event) => {
+      console.error("Speech recognition error:", event.error)
+      setIsListening(false)
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+
+    if (isListening) {
+      recognition.stop()
+    } else {
+      recognition.start()
+    }
+  }
+
   const removeAttachment = (id) => {
     setAttachments(prev => prev.filter(a => a.id !== id))
   }
@@ -153,6 +203,58 @@ function Chatbot() {
         ? prev.filter(id => id !== ruleId)
         : [...prev, ruleId]
     )
+  }
+
+  // Resizing Handlers
+  const startSidebarResize = (e) => {
+    e.preventDefault()
+    setIsResizingSidebar(true)
+  }
+
+  const startCodePanelResize = (e) => {
+    e.preventDefault()
+    setIsResizingCodePanel(true)
+  }
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (isResizingSidebar) {
+        const newWidth = Math.max(80, Math.min(600, e.clientX))
+        if (newWidth <= 120) {
+          setIsSidebarOpen(false)
+          setSidebarWidth(280) // reset the "open" width for when it re-opens
+        } else {
+          setIsSidebarOpen(true)
+          setSidebarWidth(newWidth)
+        }
+      }
+      if (isResizingCodePanel) {
+        const newWidth = Math.max(300, Math.min(800, window.innerWidth - e.clientX))
+        setCodePanelWidth(newWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false)
+      setIsResizingCodePanel(false)
+    }
+
+    if (isResizingSidebar || isResizingCodePanel) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'col-resize'
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'default'
+    }
+  }, [isResizingSidebar, isResizingCodePanel])
+
+  const getFriendlyTitle = (title) => {
+    if (!title) return 'New Conversation'
+    return title.replace(/\[Attached\s+(image|file|folder):\s+.*?\]/g, 'Prompt Reference').trim()
   }
 
   const removeAttachedRule = (ruleId) => {
@@ -211,6 +313,7 @@ function Chatbot() {
         message: finalPrompt,
         chat_id: activeChatId,
         rules_applied: attachedRules,
+        attachments: attachmentsData,
         provider: selectedModel.provider,
         model: selectedModel.id
       })
@@ -219,6 +322,7 @@ function Chatbot() {
         id: response.data.id,
         role: 'bot',
         content: response.data.content,
+        attachments: response.data.attachments,
         timestamp: response.data.created_at
       }
 
@@ -312,44 +416,63 @@ function Chatbot() {
 
   const MessageContent = ({ content }) => {
     if (!content) return null
-    const parts = content.split(/(```[\s\S]*?```)/g)
+    // Strip [Attached ...] tags from the content
+    const cleanContent = content.replace(/\[Attached\s+(image|file|folder):\s+.*?\]\n?/g, '').trim()
+    if (!cleanContent) return null
+
     return (
       <div className="message-content">
-        {parts.map((part, i) => {
-          if (part.startsWith('```')) {
-            const match = part.match(/```(\w+)?\n([\s\S]*?)```/)
-            const lang = match ? match[1] || 'code' : 'code'
-            const code = match ? match[2] : part.replace(/```/g, '')
-            return (
-              <div key={i} className="code-block-container" onClick={() => {
-                setActiveCode(code)
-                setIsCodePanelOpen(true)
-              }}>
-                <div className="code-header">
-                  <span className="code-lang">{lang}</span>
-                  <button className="copy-btn" onClick={(e) => {
-                    e.stopPropagation()
-                    copyToClipboard(code)
-                  }}>
-                    <Copy size={12} /> Copy
-                  </button>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            code({ node, inline, className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || '')
+              const language = match ? match[1] : ''
+              const codeString = String(children).replace(/\n$/, '')
+
+              return !inline ? (
+                <div className="code-block-container" onClick={(e) => {
+                  e.stopPropagation()
+                  setActiveCode(codeString)
+                  setIsCodePanelOpen(true)
+                }}>
+                  <div className="code-header">
+                    <span className="code-lang">{language || 'code'}</span>
+                    <button className="copy-btn" onClick={(e) => {
+                      e.stopPropagation()
+                      copyToClipboard(codeString)
+                    }}>
+                      <Copy size={12} /> Copy
+                    </button>
+                  </div>
+                  <SyntaxHighlighter
+                    {...props}
+                    style={vscDarkPlus}
+                    language={language || 'text'}
+                    PreTag="div"
+                    className="syntax-highlighter"
+                  >
+                    {codeString}
+                  </SyntaxHighlighter>
                 </div>
-                <pre className="code-content-pre">
-                  <code>{code}</code>
-                </pre>
-              </div>
-            )
-          }
-          return <span key={i}>{part}</span>
-        })}
+              ) : (
+                <code className="inline-code" {...props}>
+                  {children}
+                </code>
+              )
+            }
+          }}
+        >
+          {cleanContent}
+        </ReactMarkdown>
       </div>
     )
   }
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${!isSidebarOpen ? 'sidebar-hidden' : ''} ${isResizingSidebar || isResizingCodePanel ? 'is-resizing' : ''}`} style={{ '--sidebar-width': isSidebarOpen ? `${sidebarWidth}px` : '80px', '--sidebar-collapsed-width': '80px' }}>
       {/* Sidebar */}
-      <aside className={`sidebar glass ${isSidebarOpen ? 'open' : 'closed'}`}>
+      <aside className={`sidebar glass ${isSidebarOpen ? 'open' : 'closed'}`} style={{ width: isSidebarOpen ? `${sidebarWidth}px` : '80px' }}>
         <div className="sidebar-header">
           <div className="logo-section">
             <Zap className="accent-icon" size={24} fill="currentColor" />
@@ -441,11 +564,15 @@ function Chatbot() {
         </div>
       </aside>
 
+      {isSidebarOpen && (
+        <div className="resizer-handle sidebar-resizer" onMouseDown={startSidebarResize} />
+      )}
+
       {/* Main Chat Area */}
       <main className="main-content">
         <header className="chat-header glass">
           <div className="header-info">
-            <h3>{activeChatId ? conversations.find(c => c.id === activeChatId)?.title : 'New Conversation'}</h3>
+            <h3>{activeChatId ? getFriendlyTitle(conversations.find(c => c.id === activeChatId)?.title) : 'New Conversation'}</h3>
             <div className="model-selector-wrapper">
               <button
                 className="model-badge selector"
@@ -479,48 +606,58 @@ function Chatbot() {
             </div>
           </div>
           <div className="header-actions">
-            <Tag size={20} />
-            <Settings size={20} onClick={() => setIsRulesPanelOpen(true)} />
+            {/* Icons removed as per user request */}
           </div>
         </header>
 
         <div className="messages-container">
-          {messages.length === 0 && !isLoading && (
-            <div className="welcome-screen fade-in">
-              <div className="welcome-logo">
-                <Zap size={48} className="accent-icon" fill="currentColor" />
+          <div className="messages-content-wrapper">
+            {messages.length === 0 && !isLoading && (
+              <div className="welcome-screen fade-in">
+                <div className="welcome-logo">
+                  <Zap size={48} className="accent-icon" fill="currentColor" />
+                </div>
+                <h1>How can I help you today?</h1>
+                <p>ITSS AI is ready to assist with code, design, and logic.</p>
               </div>
-              <h1>How can I help you today?</h1>
-              <p>ITSS AI is ready to assist with code, design, and logic.</p>
-            </div>
-          )}
-          {messages.map((msg) => (
-            <div key={msg.id} className={`message-wrapper ${msg.role}`}>
-              <div className="message-icon">
-                {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
-              </div>
-              <div className="message-bubble glass fade-in">
-                <MessageContent content={msg.content} />
-                <div className="message-time">
-                  <button className="copy-btn" onClick={() => copyToClipboard(msg.content)}>
-                    <Copy size={12} /> Copy
-                  </button>
-                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            )}
+            {messages.map((msg) => (
+              <div key={msg.id} className={`message-wrapper ${msg.role}`}>
+                <div className="message-icon">
+                  {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
+                </div>
+                <div className="message-bubble glass fade-in">
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="message-attachments-display">
+                      {msg.attachments.map((at, i) => (
+                        at.type === 'image' && (
+                          <img key={i} src={at.content} alt={at.name} className="bubble-image" />
+                        )
+                      ))}
+                    </div>
+                  )}
+                  <MessageContent content={msg.content} />
+                  <div className="message-time">
+                    <button className="copy-btn" onClick={() => copyToClipboard(msg.content)}>
+                      <Copy size={12} /> Copy
+                    </button>
+                    {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-          {isLoading && (
-            <div className="message-wrapper bot">
-              <div className="message-icon">
-                <Bot size={20} />
+            ))}
+            {isLoading && (
+              <div className="message-wrapper bot">
+                <div className="message-icon">
+                  <Bot size={20} />
+                </div>
+                <div className="message-bubble glass loading">
+                  <Loader2 className="animate-spin" size={20} />
+                </div>
               </div>
-              <div className="message-bubble glass loading">
-                <Loader2 className="animate-spin" size={20} />
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
+            )}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         <footer className="chat-input-container">
@@ -530,7 +667,7 @@ function Chatbot() {
                 const rule = rules.find(r => r.id === ruleId)
                 return (
                   <div key={ruleId} className="attached-rule-tag">
-                    <Tag size={12} />
+                    <ShieldCheck size={12} />
                     <span>{rule?.title}</span>
                     <button onClick={() => removeAttachedRule(ruleId)}>
                       <X size={10} />
@@ -596,7 +733,7 @@ function Chatbot() {
                   onClick={() => setIsTaggingRulesOpen(!isTaggingRulesOpen)}
                   title="Attach Rules"
                 >
-                  <Tag size={20} />
+                  <ShieldCheck size={20} />
                 </button>
 
                 {isTaggingRulesOpen && (
@@ -665,6 +802,14 @@ function Chatbot() {
               disabled={isLoading}
             />
             <button
+              className={`mic-btn ${isListening ? 'listening' : ''}`}
+              onClick={handleVoiceInput}
+              title={isListening ? "Stop Recording" : "Voice Input"}
+              disabled={isLoading}
+            >
+              {isListening ? <MicOff size={20} /> : <Mic size={20} />}
+            </button>
+            <button
               className={`send-btn ${(input.trim() || attachments.length > 0) && !isLoading ? 'active' : ''}`}
               onClick={handleSend}
               disabled={(!input.trim() && attachments.length === 0) || isLoading}
@@ -677,40 +822,43 @@ function Chatbot() {
 
       {/* Code Canvas Panel */}
       {isCodePanelOpen && (
-        <aside className="code-canvas-panel fade-in">
-          <div className="canvas-header">
-            <div className="canvas-tabs">
-              <div className="canvas-tab active">
-                <Code size={16} />
-                <span>Source Code</span>
+        <>
+          <div className="resizer-handle code-panel-resizer" onMouseDown={startCodePanelResize} />
+          <aside className="code-canvas-panel fade-in" style={{ width: `${codePanelWidth}px` }}>
+            <div className="canvas-header">
+              <div className="canvas-tabs">
+                <div className="canvas-tab active">
+                  <Code size={16} />
+                  <span>Source Code</span>
+                </div>
+              </div>
+              <div className="canvas-actions">
+                <button className="action-btn" title="Copy Code" onClick={() => copyToClipboard(activeCode)}>
+                  <Copy size={16} />
+                </button>
+                <button className="action-btn" title="Close Panel" onClick={() => setIsCodePanelOpen(false)}>
+                  <X size={20} />
+                </button>
               </div>
             </div>
-            <div className="canvas-actions">
-              <button className="action-btn" title="Copy Code" onClick={() => copyToClipboard(activeCode)}>
-                <Copy size={16} />
-              </button>
-              <button className="action-btn" title="Close Panel" onClick={() => setIsCodePanelOpen(false)}>
-                <X size={20} />
-              </button>
+            <div className="canvas-content">
+              <Editor
+                height="100%"
+                defaultLanguage="python"
+                theme="vs-dark"
+                value={activeCode}
+                options={{
+                  readOnly: true,
+                  minimap: { enabled: false },
+                  fontSize: 14,
+                  fontFamily: 'JetBrains Mono',
+                  scrollBeyondLastLine: false,
+                  padding: { top: 20 }
+                }}
+              />
             </div>
-          </div>
-          <div className="canvas-content">
-            <Editor
-              height="100%"
-              defaultLanguage="python"
-              theme="vs-dark"
-              value={activeCode}
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                fontSize: 14,
-                fontFamily: 'JetBrains Mono',
-                scrollBeyondLastLine: false,
-                padding: { top: 20 }
-              }}
-            />
-          </div>
-        </aside>
+          </aside>
+        </>
       )}
 
       {/* Rules Panel Overlay */}

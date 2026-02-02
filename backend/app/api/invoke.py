@@ -19,12 +19,17 @@ async def invoke_ai(request: schemas.InvokeRequest, db: Session = Depends(get_db
         chat_id = new_chat.id
     
     # 2. Add User Message to DB
-    user_msg = models.Message(role="user", content=request.message, chat_id=chat_id)
+    user_msg = models.Message(
+        role="user", 
+        content=request.message, 
+        attachments=request.attachments, 
+        chat_id=chat_id
+    )
     db.add(user_msg)
     
-    # 3. Fetch Rules and Construct System Prompt
-    system_instructions = ""
+    base_instructions = "You are a helpful AI assistant. You can handle greetings, general conversation, and technical tasks. "
     if request.rules_applied:
+        # Fetch Rules and Construct System Prompt
         active_rules = db.query(models.Rule).filter(models.Rule.id.in_(request.rules_applied)).all()
         if active_rules:
             import os
@@ -38,9 +43,9 @@ async def invoke_ai(request: schemas.InvokeRequest, db: Session = Depends(get_db
                     rules_content_list.append(f"### {r.title}\n{r.description}")
             
             rules_text = "\n\n---\n\n".join(rules_content_list)
-            system_instructions = f"Follow these rules strictly:\n\n{rules_text}\n\n"
+            base_instructions += f"\n\nAdditionally, follow these specific project rules strictly when applicable:\n\n{rules_text}\n\n"
     
-    full_prompt = f"{system_instructions}User: {request.message}"
+    full_prompt = f"{base_instructions}\nUser: {request.message}"
     
     # 4. Get AI Response
     # Fetch history for context
