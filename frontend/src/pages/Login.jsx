@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { User, Lock, Loader2, ArrowRight } from 'lucide-react'
+import { User, Lock, Loader2, ArrowRight, Eye, EyeOff } from 'lucide-react'
 import api from '../services/api'
 import logo from '../assets/logo.png'
 import './Login.css'
@@ -9,6 +9,7 @@ function Login({ onLogin }) {
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
+    const [showPassword, setShowPassword] = useState(false)
 
     const handleSubmit = async (e) => {
         e.preventDefault()
@@ -69,13 +70,21 @@ function Login({ onLogin }) {
                     <div className="input-group">
                         <Lock size={20} className="input-icon" />
                         <input
-                            type="password"
+                            type={showPassword ? "text" : "password"}
                             placeholder="Password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             disabled={isLoading}
                             required
                         />
+                        <button
+                            type="button"
+                            className="password-toggle"
+                            onClick={() => setShowPassword(!showPassword)}
+                            disabled={isLoading}
+                        >
+                            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
                     </div>
 
                     <button type="submit" className="login-submit-btn" disabled={isLoading}>

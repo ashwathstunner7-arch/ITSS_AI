@@ -139,6 +139,29 @@
     color: var(--accent-primary);
 }
 
+.password-toggle {
+    position: absolute;
+    right: 1.25rem;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.3s;
+}
+
+.password-toggle:hover {
+    color: white;
+}
+
+.password-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
 .login-submit-btn {
     margin-top: 1rem;
     padding: 1rem;
