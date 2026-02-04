@@ -446,6 +446,9 @@ function Chatbot() {
   const handleLogout = () => {
     localStorage.removeItem('token')
     delete api.defaults.headers.common['Authorization']
+    setUser(null)
+    setMessages([])
+    setActiveChatId(null)
     window.location.href = '/login'
   }
 
@@ -711,7 +714,7 @@ function Chatbot() {
               </div>
             )}
             <div className="profile-actions">
-              {isSidebarOpen && <span className="rule-access-badge">{user?.ruleaccess}</span>}
+              {isSidebarOpen && user && <span className="rule-access-badge">{user.ruleaccess}</span>}
               <button
                 className="logout-icon-btn"
                 title="Logout"
@@ -1104,7 +1107,7 @@ function Chatbot() {
                       <p>{rule.description}</p>
                     </div>
                     <div className="rule-action">
-                      {user?.ruleaccess?.toLowerCase() === 'admin' ? (
+                      {user && user.ruleaccess?.toLowerCase() === 'admin' ? (
                         <div className="admin-actions">
                           <button
                             className="rule-icon-btn delete"
@@ -1132,7 +1135,7 @@ function Chatbot() {
                 ))}
               </div>
 
-              {user?.ruleaccess?.toLowerCase() === 'admin' && (
+              {user && user.ruleaccess?.toLowerCase() === 'admin' && (
                 <button className="add-rule-btn glass" onClick={() => setIsAddRuleModalOpen(true)}>
                   <Plus size={18} />
                   <span>Add New Rule</span>

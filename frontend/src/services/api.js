@@ -1,7 +1,14 @@
 import axios from 'axios';
 
+const getBaseURL = () => {
+    if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+    // Fallback for local development or if served from same domain
+    if (window.location.hostname === 'localhost') return 'http://localhost:8000';
+    return ''; // Relative path if on the same host
+};
+
 const api = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+    baseURL: getBaseURL(),
 });
 
 // Add a request interceptor
