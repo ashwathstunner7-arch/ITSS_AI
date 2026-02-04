@@ -39,10 +39,12 @@ class MessageBase(BaseModel):
 
 class MessageCreate(MessageBase):
     chat_id: int
+    user_id: str
 
 class Message(MessageBase):
     id: int
     chat_id: int
+    user_id: str
     created_at: datetime
 
     class Config:
@@ -52,10 +54,17 @@ class ChatBase(BaseModel):
     title: str
 
 class ChatCreate(ChatBase):
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
 
 class ChatUpdate(BaseModel):
-    title: str
+    title: Optional[str] = None
+
+class MessageUpdate(BaseModel):
+    content: str
+    stream: Optional[bool] = False
+    provider: Optional[str] = "gemini"
+    model: Optional[str] = None
+    rules_applied: List[int] = []
 
 class Chat(ChatBase):
     id: int
@@ -72,3 +81,4 @@ class InvokeRequest(BaseModel):
     attachments: Optional[List[dict]] = None
     provider: Optional[str] = "gemini"
     model: Optional[str] = None
+    stream: Optional[bool] = False

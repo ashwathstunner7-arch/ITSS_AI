@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import auth, tenant, manifest, spell, invoke, rules, chats
+from app.api import auth, tenant, manifest, spell, invoke, rules, chats, messages
 
 from app.core.database import engine, Base
 from app.models import models
@@ -34,6 +34,7 @@ app.include_router(spell.router, prefix="/spell", tags=["Quick Actions"])
 app.include_router(invoke.router, prefix="/invoke", tags=["AI Execution"])
 app.include_router(rules.router, prefix="/rules", tags=["Rule Management"])
 app.include_router(chats.router, prefix="/chats", tags=["Chat History"])
+app.include_router(messages.router, prefix="/messages", tags=["Message Operations"])
 
 @app.get("/")
 async def root():

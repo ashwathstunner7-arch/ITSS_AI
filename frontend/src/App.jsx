@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import {
   Send,
   Plus,
@@ -6,7 +6,6 @@ import {
   Settings,
   User,
   Bot,
-  Zap,
   Loader2,
   Cpu,
   Image as ImageIcon,
@@ -27,11 +26,13 @@ import {
   Edit2,
   Check,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Eye
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import api from './services/api'
 import './App.css'
+import logo from './assets/logo.png'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -69,10 +70,15 @@ function Chatbot() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false)
   const [isResizingCodePanel, setIsResizingCodePanel] = useState(false)
   const [sidebarCollapsedWidth, setSidebarCollapsedWidth] = useState(80)
+  const [editingMessageId, setEditingMessageId] = useState(null)
+  const [editMessageContent, setEditMessageContent] = useState('')
+  const [previewImage, setPreviewImage] = useState(null)
+  const [streamingMessageId, setStreamingMessageId] = useState(null)
 
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
   const imageInputRef = useRef(null)
+  const inputRef = useRef(null)
 
   const [selectedModel, setSelectedModel] = useState({
     id: 'gemini-1.5-flash',
@@ -88,6 +94,13 @@ function Chatbot() {
   ]
 
   const messagesEndRef = useRef(null)
+
+  useLayoutEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto'
+      inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 200)}px`
+    }
+  }, [input])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -122,6 +135,40 @@ function Chatbot() {
     }
   }
 
+  const resizeImage = (file, maxWidth = 1024, maxHeight = 1024) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width *= maxHeight / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8)); // Convert to compressed JPEG
+        };
+      };
+    });
+  };
+
   const fetchChats = async () => {
     try {
       const response = await api.get('/chats')
@@ -135,19 +182,27 @@ function Chatbot() {
     const files = Array.from(e.target.files)
     const newAttachments = await Promise.all(files.map(async file => {
       return new Promise((resolve) => {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          resolve({
-            id: Math.random().toString(36).substr(2, 9),
-            name: file.name,
-            type: file.type.startsWith('image/') ? 'image' : 'file',
-            content: e.target.result,
-            fileObj: file
-          })
-        }
         if (file.type.startsWith('image/')) {
-          reader.readAsDataURL(file)
+          resizeImage(file).then(compressedContent => {
+            resolve({
+              id: Math.random().toString(36).substr(2, 9),
+              name: file.name,
+              type: 'image',
+              content: compressedContent,
+              fileObj: file
+            })
+          })
         } else {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            resolve({
+              id: Math.random().toString(36).substr(2, 9),
+              name: file.name,
+              type: 'file',
+              content: e.target.result,
+              fileObj: file
+            })
+          }
           reader.readAsText(file)
         }
       })
@@ -261,6 +316,46 @@ function Chatbot() {
     setAttachedRules(prev => prev.filter(id => id !== ruleId))
   }
 
+  const consumeStream = async (response, tempBotId) => {
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let accumulatedContent = ""
+    let partialLine = ""
+
+    setStreamingMessageId(tempBotId)
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = (partialLine + chunk).split('\n')
+      partialLine = lines.pop()
+
+      for (const line of lines) {
+        if (!line.trim() || !line.startsWith('data: ')) continue
+
+        try {
+          const data = JSON.parse(line.replace('data: ', ''))
+
+          if (data.type === 'metadata') {
+            if (data.chat_id && !activeChatId) {
+              setActiveChatId(data.chat_id)
+              fetchChats()
+            }
+          } else if (data.type === 'content') {
+            accumulatedContent += data.delta
+            setMessages(prev => prev.map(m => m.id === tempBotId ? { ...m, content: accumulatedContent } : m))
+          } else if (data.type === 'message_id') {
+            setMessages(prev => prev.map(m => m.id === tempBotId ? { ...m, id: data.id } : m))
+          }
+        } catch (e) {
+          console.error("Error parsing SSE line:", line, e)
+        }
+      }
+    }
+    setStreamingMessageId(null)
+  }
+
   const fetchChatMessages = async (chatId) => {
     try {
       const response = await api.get(`/chats/${chatId}`)
@@ -277,6 +372,7 @@ function Chatbot() {
     setAttachedRules([])
     setAttachments([])
   }
+
 
   const handleSend = async () => {
     if ((!input.trim() && attachments.length === 0) || isLoading) return
@@ -309,32 +405,40 @@ function Chatbot() {
     setIsLoading(true)
 
     try {
-      const response = await api.post('/invoke', {
-        message: finalPrompt,
-        chat_id: activeChatId,
-        rules_applied: attachedRules,
-        attachments: attachmentsData,
-        provider: selectedModel.provider,
-        model: selectedModel.id
+      const response = await fetch(`${api.defaults.baseURL}/invoke`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': api.defaults.headers.common['Authorization']
+        },
+        body: JSON.stringify({
+          message: finalPrompt,
+          chat_id: activeChatId,
+          rules_applied: attachedRules,
+          attachments: attachmentsData,
+          provider: selectedModel.provider,
+          model: selectedModel.id,
+          stream: true
+        })
       })
 
+      if (!response.ok) throw new Error('Streaming failed')
+
+      const tempBotId = Date.now() + 1
       const botMessage = {
-        id: response.data.id,
+        id: tempBotId,
         role: 'bot',
-        content: response.data.content,
-        attachments: response.data.attachments,
-        timestamp: response.data.created_at
+        content: '',
+        timestamp: new Date()
       }
 
       setMessages(prev => [...prev, botMessage])
+      setIsLoading(false)
 
-      if (!activeChatId && response.data.chat_id) {
-        setActiveChatId(response.data.chat_id)
-        fetchChats()
-      }
+      await consumeStream(response, tempBotId)
     } catch (error) {
-      console.error("Failed to send message:", error)
-    } finally {
+      console.error("Streaming error:", error)
+      alert("Failed to send message. Please check your connection or AI provider settings.")
       setIsLoading(false)
     }
   }
@@ -376,6 +480,62 @@ function Chatbot() {
     e.stopPropagation()
     setEditingChatId(chat.id)
     setEditTitle(chat.title)
+  }
+
+  const startEditingMessage = (msg) => {
+    setEditingMessageId(msg.id)
+    setEditMessageContent(msg.content)
+  }
+
+  const handleEditMessage = async (messageId) => {
+    if (!editMessageContent.trim()) {
+      setEditingMessageId(null)
+      return
+    }
+
+    setIsLoading(true)
+    setEditingMessageId(null)
+
+    try {
+      const response = await fetch(`${api.defaults.baseURL}/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': api.defaults.headers.common['Authorization']
+        },
+        body: JSON.stringify({
+          content: editMessageContent,
+          stream: true,
+          provider: selectedModel.provider,
+          model: selectedModel.id,
+          rules_applied: attachedRules
+        })
+      })
+
+      if (!response.ok) throw new Error('Edit failed')
+
+      const tempBotId = Date.now() + 2
+
+      // Update local messages: remove all messages after the edited one and add the new bot response
+      setMessages(prev => {
+        const index = prev.findIndex(m => m.id === messageId)
+        const updatedUserMsg = { ...prev[index], content: editMessageContent }
+        const newBotMsg = {
+          id: tempBotId,
+          role: 'bot',
+          content: '',
+          timestamp: new Date()
+        }
+        return [...prev.slice(0, index), updatedUserMsg, newBotMsg]
+      })
+
+      setIsLoading(false)
+      await consumeStream(response, tempBotId)
+    } catch (error) {
+      console.error("Failed to edit message:", error)
+      alert("Failed to edit message. Please try again.")
+      setIsLoading(false)
+    }
   }
 
   const copyToClipboard = (text) => {
@@ -475,7 +635,7 @@ function Chatbot() {
       <aside className={`sidebar glass ${isSidebarOpen ? 'open' : 'closed'}`} style={{ width: isSidebarOpen ? `${sidebarWidth}px` : '80px' }}>
         <div className="sidebar-header">
           <div className="logo-section">
-            <Zap className="accent-icon" size={24} fill="currentColor" />
+            <img src={logo} alt="Logo" className="sidebar-logo-img" />
             {isSidebarOpen && <h2>ITSS AI</h2>}
           </div>
           <button
@@ -598,7 +758,7 @@ function Chatbot() {
                         <span className="option-name">{model.name}</span>
                         <span className="option-provider">{model.provider}</span>
                       </div>
-                      {selectedModel.id === model.id && <Zap size={14} className="accent-icon" />}
+                      {selectedModel.id === model.id && <img src={logo} alt="selected" className="sidebar-logo-img small" style={{ width: '14px', height: '14px' }} />}
                     </div>
                   ))}
                 </div>
@@ -615,7 +775,7 @@ function Chatbot() {
             {messages.length === 0 && !isLoading && (
               <div className="welcome-screen fade-in">
                 <div className="welcome-logo">
-                  <Zap size={48} className="accent-icon" fill="currentColor" />
+                  <img src={logo} alt="Logo" className="welcome-logo-img pulse" />
                 </div>
                 <h1>How can I help you today?</h1>
                 <p>ITSS AI is ready to assist with code, design, and logic.</p>
@@ -624,9 +784,9 @@ function Chatbot() {
             {messages.map((msg) => (
               <div key={msg.id} className={`message-wrapper ${msg.role}`}>
                 <div className="message-icon">
-                  {msg.role === 'bot' ? <Bot size={20} /> : <User size={20} />}
+                  {msg.role === 'bot' ? <img src={logo} alt="AI" className="bot-avatar-img" /> : <User size={20} />}
                 </div>
-                <div className="message-bubble glass fade-in">
+                <div className={`message-bubble glass fade-in ${streamingMessageId === msg.id ? 'is-streaming' : ''}`}>
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="message-attachments-display">
                       {msg.attachments.map((at, i) => (
@@ -636,11 +796,51 @@ function Chatbot() {
                       ))}
                     </div>
                   )}
-                  <MessageContent content={msg.content} />
+
+                  {editingMessageId === msg.id ? (
+                    <div className="message-edit-container">
+                      <textarea
+                        className="message-edit-textarea"
+                        value={editMessageContent}
+                        onChange={(e) => setEditMessageContent(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleEditMessage(msg.id);
+                          }
+                          if (e.key === 'Escape') {
+                            setEditingMessageId(null);
+                          }
+                        }}
+                        autoFocus
+                      />
+                      <div className="edit-actions">
+                        <button className="save-btn" onClick={() => handleEditMessage(msg.id)}>
+                          Send
+                        </button>
+                        <button className="cancel-btn" onClick={() => setEditingMessageId(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <MessageContent content={msg.content} />
+                      {streamingMessageId === msg.id && <span className="streaming-cursor"></span>}
+                    </>
+                  )}
+
                   <div className="message-time">
-                    <button className="copy-btn" onClick={() => copyToClipboard(msg.content)}>
-                      <Copy size={12} /> Copy
-                    </button>
+                    <div className="message-actions-row">
+                      <button className="copy-btn" onClick={() => copyToClipboard(msg.content)}>
+                        <Copy size={12} /> Copy
+                      </button>
+                      {msg.role === 'user' && !editingMessageId && (
+                        <button className="copy-btn" onClick={() => startEditingMessage(msg)}>
+                          <Edit2 size={12} /> Edit
+                        </button>
+                      )}
+                    </div>
                     {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
@@ -649,10 +849,12 @@ function Chatbot() {
             {isLoading && (
               <div className="message-wrapper bot">
                 <div className="message-icon">
-                  <Bot size={20} />
+                  <img src={logo} alt="AI" className="bot-avatar-img pulse" />
                 </div>
-                <div className="message-bubble glass loading">
-                  <Loader2 className="animate-spin" size={20} />
+                <div className="message-bubble glass thinking-bubble">
+                  <div className="thinking-dots">
+                    <span></span><span></span><span></span>
+                  </div>
                 </div>
               </div>
             )}
@@ -680,16 +882,28 @@ function Chatbot() {
           {attachments.length > 0 && (
             <div className="attachments-preview-bar glass fade-in">
               {attachments.map(file => (
-                <div key={file.id} className="attachment-preview-item glass">
+                <div key={file.id} className={`attachment-preview-item glass ${file.type === 'image' ? 'image-type' : ''}`}>
                   {file.type === 'image' ? (
-                    <img src={file.content} alt={file.name} />
+                    <div className="attachment-image-wrapper">
+                      <img src={file.content} alt={file.name} />
+                      <div className="attachment-overlay">
+                        <button className="overlay-btn" onClick={() => setPreviewImage(file.content)}>
+                          <Eye size={16} />
+                        </button>
+                        <button className="overlay-btn delete" onClick={() => removeAttachment(file.id)}>
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
                   ) : (
-                    <FileText size={16} />
+                    <>
+                      <FileText size={16} />
+                      <span className="file-name">{file.name}</span>
+                      <button className="remove-btn" onClick={() => removeAttachment(file.id)}>
+                        <X size={12} />
+                      </button>
+                    </>
                   )}
-                  <span className="file-name">{file.name}</span>
-                  <button className="remove-btn" onClick={() => removeAttachment(file.id)}>
-                    <X size={12} />
-                  </button>
                 </div>
               ))}
             </div>
@@ -790,6 +1004,7 @@ function Chatbot() {
 
             <textarea
               placeholder="Ask anything..."
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -867,7 +1082,7 @@ function Chatbot() {
           <div className="rules-panel glass fade-in" onClick={e => e.stopPropagation()}>
             <div className="panel-header">
               <div className="header-title">
-                <Layout className="accent-icon" size={24} />
+                <img src={logo} alt="Logo" className="sidebar-logo-img" style={{ marginRight: '10px' }} />
                 <h2>Rule Management</h2>
               </div>
               <button className="close-btn" onClick={() => setIsRulesPanelOpen(false)}>
@@ -934,7 +1149,7 @@ function Chatbot() {
           <div className="rules-panel add-rule-modal glass fade-in" onClick={e => e.stopPropagation()}>
             <div className="panel-header">
               <div className="header-title">
-                <Plus className="accent-icon" size={24} />
+                <img src={logo} alt="Logo" className="sidebar-logo-img" style={{ marginRight: '10px' }} />
                 <h2>Create Custom Rule</h2>
               </div>
               <button className="close-btn" onClick={() => setIsAddRuleModalOpen(false)}>
@@ -989,6 +1204,15 @@ function Chatbot() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {/* Lightbox for image preview */}
+      {previewImage && (
+        <div className="lightbox-overlay fade-in" onClick={() => setPreviewImage(null)}>
+          <button className="lightbox-close" onClick={() => setPreviewImage(null)}>
+            <X size={32} />
+          </button>
+          <img src={previewImage} alt="Preview" className="lightbox-image" onClick={e => e.stopPropagation()} />
         </div>
       )}
     </div>

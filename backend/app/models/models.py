@@ -27,7 +27,7 @@ class Chat(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
-    user_id = Column(Integer, ForeignKey("USER.id"))
+    user_id = Column(String(255), ForeignKey("USER.username"))
 
     owner = relationship("User", back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
@@ -37,6 +37,7 @@ class Message(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     role = Column(String(50)) # 'user' or 'bot'
+    user_id = Column(String(255), ForeignKey("USER.username"))
     content = Column(Text)
     attachments = Column(JSON) # Store as JSON
     created_at = Column(DateTime, default=datetime.utcnow)

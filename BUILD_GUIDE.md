@@ -92,3 +92,41 @@ If you have Docker Compose installed, you can start the entire stack:
 ```bash
 docker-compose up --build
 ```
+
+---
+
+## 🛠️ Troubleshooting & Manual Fixes
+
+### ModuleNotFoundError or ImportError (e.g., `pydantic_core`, `cygrpc`)
+These errors often occur if the Python version is incompatible (like Python 3.14) or the virtual environment is corrupted.
+
+**Manual Fix Steps:**
+1.  **Stop all running processes** (Ctrl+C in your terminals).
+2.  **Delete the existing virtual environment**:
+    ```powershell
+    # Inside the backend directory
+    rm -Recurse -Force venv
+    ```
+3.  **Recreate using a stable Python version (3.11 or 3.12)**:
+    ```powershell
+    # If you have multiple versions, specify 3.12
+    py -3.12 -m venv venv
+    ```
+4.  **Activate and re-install dependencies**:
+    ```powershell
+    .\venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
+5.  **Restart the server**:
+    ```powershell
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ```
+
+### Database Schema Mismatch
+If you see errors related to column types or missing columns after an update:
+1.  **Backup your data** (if important).
+2.  **Delete the local database file** (e.g., `itss_ai.db`).
+3.  **Run the migration or seed script**:
+    ```powershell
+    python migrate.py  # or seed_db.py
+    ```

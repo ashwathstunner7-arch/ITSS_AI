@@ -44,7 +44,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
         raise HTTPException(status_code=400, detail="User account is inactive")
     
     print(f"DEBUG: Login successful for {user.username}")
-    access_token = security.create_access_token(subject=user.id)
+    access_token = security.create_access_token(subject=user.username)
     return {"access_token": access_token, "token_type": "bearer"}
 
 from app.api.deps import get_current_user

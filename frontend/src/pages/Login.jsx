@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Zap, User, Lock, Loader2, ArrowRight } from 'lucide-react'
+import { User, Lock, Loader2, ArrowRight } from 'lucide-react'
 import api from '../services/api'
+import logo from '../assets/logo.png'
 import './Login.css'
 
 function Login({ onLogin }) {
@@ -44,7 +45,7 @@ function Login({ onLogin }) {
             <div className="login-card glass fade-in">
                 <div className="login-header">
                     <div className="login-logo">
-                        <Zap size={32} fill="currentColor" />
+                        <img src={logo} alt="Logo" className="login-logo-img" />
                     </div>
                     <h1>Welcome Back</h1>
                     <p>Login to access your AI workspace</p>
