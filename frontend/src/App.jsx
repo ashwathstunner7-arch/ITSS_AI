@@ -27,7 +27,8 @@ import {
   Check,
   Copy,
   ExternalLink,
-  Eye
+  Eye,
+  LogOut
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import api from './services/api'
@@ -446,9 +447,6 @@ function Chatbot() {
   const handleLogout = () => {
     localStorage.removeItem('token')
     delete api.defaults.headers.common['Authorization']
-    setUser(null)
-    setMessages([])
-    setActiveChatId(null)
     window.location.href = '/login'
   }
 
@@ -720,7 +718,7 @@ function Chatbot() {
                 title="Logout"
                 onClick={handleLogout}
               >
-                <X size={18} />
+                <LogOut size={18} />
               </button>
             </div>
           </div>
