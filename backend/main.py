@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.api import auth, tenant, manifest, spell, invoke, rules, chats, messages
+from app.core.config import settings
 
 from app.core.database import engine, Base
 from app.models import models
@@ -37,9 +38,10 @@ app.include_router(chats.router, prefix="/chats", tags=["Chat History"])
 app.include_router(messages.router, prefix="/messages", tags=["Message Operations"])
 
 @app.get("/")
+@app.head("/")
 async def root():
     return {"message": "Welcome to ITSS AI API"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)

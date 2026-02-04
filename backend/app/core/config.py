@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "ITSS AI"
+    PORT: int = int(os.getenv("PORT", 8000))
     
     # MySQL Database Settings
     DB_USER: str = os.getenv("DB_USER", "root")
