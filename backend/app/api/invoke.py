@@ -36,6 +36,8 @@ async def invoke_ai(
         user_id=current_user.username
     )
     db.add(user_msg)
+    db.commit()
+    db.refresh(user_msg)
     
     base_instructions = "You are a helpful AI assistant. You can handle greetings, general conversation, and technical tasks. "
     if request.rules_applied:
