@@ -58,6 +58,7 @@ class ChatCreate(ChatBase):
 
 class ChatUpdate(BaseModel):
     title: Optional[str] = None
+    is_pinned: Optional[bool] = None
 
 class MessageUpdate(BaseModel):
     content: str
@@ -68,6 +69,7 @@ class MessageUpdate(BaseModel):
 
 class Chat(ChatBase):
     id: int
+    is_pinned: bool = False
     created_at: datetime
     messages: List[Message] = []
 

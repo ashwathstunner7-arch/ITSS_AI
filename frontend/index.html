@@ -10,6 +10,15 @@
 
 <body>
   <div id="root"></div>
+  <script>
+    // Polyfill for Object.hasOwn (required for older browser engines in plugins)
+    if (!Object.hasOwn) {
+      Object.hasOwn = function (obj, key) {
+        return Object.prototype.hasOwnProperty.call(obj, key);
+      };
+      console.log("Object.hasOwn polyfilled");
+    }
+  </script>
   <script type="module" src="/src/main.jsx"></script>
 </body>
 

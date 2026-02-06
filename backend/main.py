@@ -27,6 +27,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi import Request, Response
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response: Response = await call_next(request)
+    # Remove default restrictive framing headers if any
+    if "X-Frame-Options" in response.headers:
+        del response.headers["X-Frame-Options"]
+    
+    # Explicitly allow framing for the plugin
+    # In production, you should restrict this to specific domains
+    response.headers["Content-Security-Policy"] = "frame-ancestors *"
+    # Alternatively, you can set it to ALLOWALL although it's non-standard (modern browsers use CSP)
+    # response.headers["X-Frame-Options"] = "ALLOWALL" 
+    
+    return response
+
 # Include Routers
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 app.include_router(tenant.router, prefix="/tenant", tags=["Tenants"])

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import {
   Send,
   Plus,
@@ -28,7 +28,11 @@ import {
   Copy,
   ExternalLink,
   Eye,
-  LogOut
+  LogOut,
+  Clock,
+  History,
+  Pin,
+  Pencil
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import api from './services/api'
@@ -40,15 +44,44 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import Login from './pages/Login'
 
+// Safe LocalStorage helper for restricted environments (like iframes)
+const storage = {
+  get: (key) => {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return null;
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn('LocalStorage access blocked:', e);
+      return null;
+    }
+  },
+  set: (key, value) => {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('LocalStorage write blocked:', e);
+    }
+  },
+  remove: (key) => {
+    try {
+      if (typeof window === 'undefined' || !window.localStorage) return;
+      localStorage.removeItem(key);
+    } catch (e) {
+      console.warn('LocalStorage remove blocked:', e);
+    }
+  }
+};
+
 // Rename old App to Chatbot
-function Chatbot() {
+function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const [user, setUser] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 768)
   const [isRulesPanelOpen, setIsRulesPanelOpen] = useState(false)
   const [isTaggingRulesOpen, setIsTaggingRulesOpen] = useState(false)
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
@@ -75,6 +108,7 @@ function Chatbot() {
   const [editMessageContent, setEditMessageContent] = useState('')
   const [previewImage, setPreviewImage] = useState(null)
   const [streamingMessageId, setStreamingMessageId] = useState(null)
+  const [isMobileHistoryOpen, setIsMobileHistoryOpen] = useState(false)
 
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
@@ -116,7 +150,28 @@ function Chatbot() {
     fetchUserData()
     fetchRules()
     fetchChats()
-  }, [])
+
+    const handleResize = () => {
+      const mobile = window.innerWidth <= 768
+      setIsMobile(mobile)
+      if (mobile) setIsSidebarOpen(false)
+    }
+    window.addEventListener('resize', handleResize)
+
+    // Handle initial prompt from params
+    const params = new URLSearchParams(window.location.search)
+    const initialPrompt = params.get('prompt') || params.get('q')
+    if (initialPrompt) {
+      setInput(decodeURIComponent(initialPrompt))
+    }
+
+    // Force sidebar closed in plugin mode
+    if (isPluginMode) {
+      setIsSidebarOpen(false)
+    }
+
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isPluginMode, setIsMobile])
 
   const fetchUserData = async () => {
     try {
@@ -357,6 +412,63 @@ function Chatbot() {
     setStreamingMessageId(null)
   }
 
+  const groupConversationsByDate = (convs) => {
+    const groups = {
+      'Pinned': [],
+      'Today': [],
+      'Yesterday': [],
+      'Last 7 Days': [],
+      'Last 30 Days': [],
+      'Older': []
+    }
+
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const oneDayMs = 24 * 60 * 60 * 1000
+
+    convs.forEach(conv => {
+      if (conv.is_pinned) {
+        groups['Pinned'].push(conv)
+        return
+      }
+
+      const convDate = new Date(conv.created_at)
+      const convTimestamp = new Date(convDate.getFullYear(), convDate.getMonth(), convDate.getDate()).getTime()
+      const diffDays = Math.round((startOfToday - convTimestamp) / oneDayMs)
+
+      if (diffDays <= 0) groups['Today'].push(conv)
+      else if (diffDays === 1) groups['Yesterday'].push(conv)
+      else if (diffDays < 7) groups['Last 7 Days'].push(conv)
+      else if (diffDays < 30) groups['Last 30 Days'].push(conv)
+      else groups['Older'].push(conv)
+    })
+
+    return Object.fromEntries(Object.entries(groups).filter(([_, v]) => v.length > 0))
+  }
+
+  const handlePinChat = async (e, chatId, currentStatus) => {
+    e.stopPropagation()
+    try {
+      await api.patch(`/chats/${chatId}`, { is_pinned: !currentStatus })
+      fetchChats()
+    } catch (error) {
+      console.error("Failed to pin chat:", error)
+    }
+  }
+
+  const handleDeleteAllHistory = async () => {
+    if (!window.confirm("Are you sure you want to delete all chat history? This cannot be undone.")) return
+    try {
+      await api.delete('/chats/all')
+      setConversations([])
+      setActiveChatId(null)
+      setMessages([])
+      if (isMobile || isPluginMode) setIsMobileHistoryOpen(false)
+    } catch (error) {
+      console.error("Failed to delete all history:", error)
+    }
+  }
+
   const fetchChatMessages = async (chatId) => {
     try {
       const response = await api.get(`/chats/${chatId}`)
@@ -445,9 +557,9 @@ function Chatbot() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('token')
+    storage.remove('token')
     delete api.defaults.headers.common['Authorization']
-    window.location.href = '/login'
+    window.location.href = `/login${window.location.search}`
   }
 
   const handleDeleteChat = async (e, chatId) => {
@@ -498,11 +610,15 @@ function Chatbot() {
     setEditingMessageId(null)
 
     try {
-      const response = await fetch(`${api.defaults.baseURL}/messages/${messageId}`, {
+      const token = storage.get('token')
+      const baseUrl = api.defaults.baseURL || ''
+      const url = `${baseUrl}/messages/${messageId}`
+
+      const response = await fetch(url, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': api.defaults.headers.common['Authorization']
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           content: editMessageContent,
@@ -513,13 +629,17 @@ function Chatbot() {
         })
       })
 
-      if (!response.ok) throw new Error('Edit failed')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || 'Edit failed')
+      }
 
       const tempBotId = Date.now() + 2
 
       // Update local messages: remove all messages after the edited one and add the new bot response
       setMessages(prev => {
         const index = prev.findIndex(m => m.id === messageId)
+        if (index === -1) return prev
         const updatedUserMsg = { ...prev[index], content: editMessageContent }
         const newBotMsg = {
           id: tempBotId,
@@ -534,7 +654,7 @@ function Chatbot() {
       await consumeStream(response, tempBotId)
     } catch (error) {
       console.error("Failed to edit message:", error)
-      alert("Failed to edit message. Please try again.")
+      alert(`Failed to edit message: ${error.message}`)
       setIsLoading(false)
     }
   }
@@ -631,109 +751,143 @@ function Chatbot() {
   }
 
   return (
-    <div className={`app-container ${!isSidebarOpen ? 'sidebar-hidden' : ''} ${isResizingSidebar || isResizingCodePanel ? 'is-resizing' : ''}`} style={{ '--sidebar-width': isSidebarOpen ? `${sidebarWidth}px` : '80px', '--sidebar-collapsed-width': '80px' }}>
-      {/* Sidebar */}
-      <aside className={`sidebar glass ${isSidebarOpen ? 'open' : 'closed'}`} style={{ width: isSidebarOpen ? `${sidebarWidth}px` : '80px' }}>
-        <div className="sidebar-header">
-          <div className="logo-section">
-            <img src={logo} alt="Logo" className="sidebar-logo-img" />
-            {isSidebarOpen && <h2>ITSS AI</h2>}
+    <div className={`app-container ${!isSidebarOpen ? 'sidebar-hidden' : ''} ${isResizingSidebar || isResizingCodePanel ? 'is-resizing' : ''} ${isPluginMode ? 'is-plugin' : ''} ${isMobile ? 'is-mobile' : ''}`} style={{ '--sidebar-width': isSidebarOpen ? `${sidebarWidth}px` : '80px', '--sidebar-collapsed-width': '80px' }}>
+      {/* Sidebar - Hidden on mobile/plugin */}
+      {!isMobile && !isPluginMode && (
+        <aside className={`sidebar glass ${isSidebarOpen ? 'open' : 'closed'}`} style={{ width: isSidebarOpen ? `${sidebarWidth}px` : '80px' }}>
+          <div className="sidebar-header">
+            <div className="logo-section">
+              {!isPluginMode && <img src={logo} alt="Logo" className="sidebar-logo-img" />}
+              {isSidebarOpen && <h2>ITSS AI</h2>}
+            </div>
+            <button
+              className="toggle-sidebar"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            >
+              {isSidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+            </button>
           </div>
-          <button
-            className="toggle-sidebar"
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          >
-            {isSidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+
+          <button className="new-chat-btn" onClick={handleNewChat}>
+            <Plus size={18} />
+            {isSidebarOpen && <span>New Chat</span>}
           </button>
-        </div>
 
-        <button className="new-chat-btn" onClick={handleNewChat}>
-          <Plus size={18} />
-          {isSidebarOpen && <span>New Chat</span>}
-        </button>
+          <div className="sidebar-content">
+            <div className="section-header-row">
+              <div className="section-label">{isSidebarOpen && 'Recent Chats'}</div>
+              {isSidebarOpen && conversations.length > 0 && (
+                <button className="delete-all-btn" onClick={handleDeleteAllHistory} title="Delete All History">
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+            <div className="conversations-list">
+              {Object.entries(groupConversationsByDate(conversations)).map(([group, chats]) => (
+                <React.Fragment key={group}>
+                  {isSidebarOpen && <div className="group-divider">{group}</div>}
+                  {chats.map(conv => (
+                    <div
+                      key={conv.id}
+                      className={`conv-item ${activeChatId === conv.id ? 'active' : ''} ${conv.is_pinned ? 'pinned' : ''}`}
+                      onClick={() => fetchChatMessages(conv.id)}
+                    >
+                      <MessageSquare size={16} />
+                      {isSidebarOpen && (
+                        editingChatId === conv.id ? (
+                          <input
+                            className="edit-input"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleRenameChat(e, conv.id)
+                              if (e.key === 'Escape') setEditingChatId(null)
+                            }}
+                            onBlur={(e) => handleRenameChat(e, conv.id)}
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <span className="conv-title">{conv.title}</span>
+                        )
+                      )}
+                      {isSidebarOpen && (
+                        <div className="chat-actions">
+                          <button
+                            className={`action-btn ${conv.is_pinned ? 'active' : ''}`}
+                            onClick={(e) => handlePinChat(e, conv.id, conv.is_pinned)}
+                            title={conv.is_pinned ? "Unpin" : "Pin"}
+                          >
+                            <Pin size={14} fill={conv.is_pinned ? "currentColor" : "none"} />
+                          </button>
+                          <button className="action-btn" onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingChatId(conv.id)
+                            setEditTitle(conv.title)
+                          }} title="Rename">
+                            <Pencil size={14} />
+                          </button>
+                          <button className="action-btn" onClick={(e) => handleDeleteChat(e, conv.id)} title="Delete">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </React.Fragment>
+              ))}
+            </div>
 
-        <div className="sidebar-content">
-          <div className="section-label">{isSidebarOpen && 'Recent Chats'}</div>
-          <div className="conversations-list">
-            {conversations.map(conv => (
-              <div
-                key={conv.id}
-                className={`conv-item ${activeChatId === conv.id ? 'active' : ''}`}
-                onClick={() => fetchChatMessages(conv.id)}
-              >
-                <MessageSquare size={16} />
-                {isSidebarOpen && (
-                  editingChatId === conv.id ? (
-                    <input
-                      className="edit-input"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onBlur={(e) => handleRenameChat(e, conv.id)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleRenameChat(e, conv.id)}
-                      autoFocus
-                      onClick={e => e.stopPropagation()}
-                    />
-                  ) : (
-                    <>
-                      <span>{conv.title}</span>
-                      <div className="chat-actions">
-                        <button className="action-btn" onClick={(e) => startEditing(e, conv)}>
-                          <Edit2 size={12} />
-                        </button>
-                        <button className="action-btn delete" onClick={(e) => handleDeleteChat(e, conv.id)}>
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </>
-                  )
-                )}
+            <div className="section-label">{isSidebarOpen && 'Tools'}</div>
+            <div className="conversations-list">
+              <div className={`conv-item ${isRulesPanelOpen ? 'active' : ''}`} onClick={() => setIsRulesPanelOpen(true)}>
+                <Layout size={16} />
+                {isSidebarOpen && <span>Rule Management</span>}
               </div>
-            ))}
-          </div>
-
-          <div className="section-label">{isSidebarOpen && 'Tools'}</div>
-          <div className="conversations-list">
-            <div className={`conv-item ${isRulesPanelOpen ? 'active' : ''}`} onClick={() => setIsRulesPanelOpen(true)}>
-              <Layout size={16} />
-              {isSidebarOpen && <span>Rule Management</span>}
             </div>
           </div>
-        </div>
 
-        <div className="sidebar-footer">
-          <div className="user-profile">
-            <div className="avatar">
-              <User size={20} />
-            </div>
-            {isSidebarOpen && user && (
-              <div className="user-info">
-                <span className="user-name">{user.username}</span>
-                <span className="user-status">{user.emailaddress || 'Online'}</span>
+          <div className="sidebar-footer">
+            <div className="user-profile">
+              <div className="avatar">
+                <User size={20} />
               </div>
-            )}
-            <div className="profile-actions">
-              {isSidebarOpen && user && <span className="rule-access-badge">{user.ruleaccess}</span>}
-              <button
-                className="logout-icon-btn"
-                title="Logout"
-                onClick={handleLogout}
-              >
-                <LogOut size={18} />
-              </button>
+              {isSidebarOpen && user && (
+                <div className="user-info">
+                  <span className="user-name">{user.username}</span>
+                  <span className="user-status">{user.emailaddress || 'Online'}</span>
+                </div>
+              )}
+              <div className="profile-actions">
+                {isSidebarOpen && user && <span className="rule-access-badge">{user.ruleaccess}</span>}
+                <button
+                  className="logout-icon-btn"
+                  title="Logout"
+                  onClick={handleLogout}
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      )}
 
-      {isSidebarOpen && (
+      {!isMobile && !isPluginMode && isSidebarOpen && (
         <div className="resizer-handle sidebar-resizer" onMouseDown={startSidebarResize} />
       )}
 
-      {/* Main Chat Area */}
+      {/* Remove the old sidebar toggle as requested - we will use a history icon instead */}
+
       <main className="main-content">
         <header className="chat-header glass">
           <div className="header-info">
-            <h3>{activeChatId ? getFriendlyTitle(conversations.find(c => c.id === activeChatId)?.title) : 'New Conversation'}</h3>
+            <div className="header-main-info">
+              <h3 className="conversation-title">
+                {activeChatId ? getFriendlyTitle(conversations.find(c => c.id === activeChatId)?.title) : (isPluginMode ? ' ' : 'New Conversation')}
+              </h3>
+            </div>
+
             <div className="model-selector-wrapper">
               <button
                 className="model-badge selector"
@@ -767,6 +921,25 @@ function Chatbot() {
             </div>
           </div>
           <div className="header-actions">
+            {(isMobile || isPluginMode) && (
+              <div className="mobile-header-controls">
+                <button
+                  className="mobile-nav-btn glass history-btn"
+                  onClick={() => setIsMobileHistoryOpen(true)}
+                  title="History"
+                >
+                  <Clock size={20} />
+                </button>
+                {user && (
+                  <div className="mobile-user-details">
+                    {!isPluginMode && <span className="mobile-username">{user.username}</span>}
+                    <button className="mobile-nav-btn logout glass" onClick={handleLogout} title="Logout">
+                      <LogOut size={20} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             {/* Icons removed as per user request */}
           </div>
         </header>
@@ -1037,219 +1210,444 @@ function Chatbot() {
       </main>
 
       {/* Code Canvas Panel */}
-      {isCodePanelOpen && (
-        <>
-          <div className="resizer-handle code-panel-resizer" onMouseDown={startCodePanelResize} />
-          <aside className="code-canvas-panel fade-in" style={{ width: `${codePanelWidth}px` }}>
-            <div className="canvas-header">
-              <div className="canvas-tabs">
-                <div className="canvas-tab active">
-                  <Code size={16} />
-                  <span>Source Code</span>
+      {
+        isCodePanelOpen && (
+          <>
+            <div className="resizer-handle code-panel-resizer" onMouseDown={startCodePanelResize} />
+            <aside className="code-canvas-panel fade-in" style={{ width: `${codePanelWidth}px` }}>
+              <div className="canvas-header">
+                <div className="canvas-tabs">
+                  <div className="canvas-tab active">
+                    <Code size={16} />
+                    <span>Source Code</span>
+                  </div>
+                </div>
+                <div className="canvas-actions">
+                  <button className="action-btn" title="Copy Code" onClick={() => copyToClipboard(activeCode)}>
+                    <Copy size={16} />
+                  </button>
+                  <button className="action-btn" title="Close Panel" onClick={() => setIsCodePanelOpen(false)}>
+                    <X size={20} />
+                  </button>
                 </div>
               </div>
-              <div className="canvas-actions">
-                <button className="action-btn" title="Copy Code" onClick={() => copyToClipboard(activeCode)}>
-                  <Copy size={16} />
+              <div className="canvas-content">
+                <Editor
+                  height="100%"
+                  defaultLanguage="python"
+                  theme="vs-dark"
+                  value={activeCode}
+                  options={{
+                    readOnly: true,
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    fontFamily: 'JetBrains Mono',
+                    scrollBeyondLastLine: false,
+                    padding: { top: 20 }
+                  }}
+                />
+              </div>
+            </aside>
+          </>
+        )
+      }
+
+      {/* Rules Panel Overlay */}
+      {
+        isRulesPanelOpen && (
+          <div className="panel-overlay" onClick={() => setIsRulesPanelOpen(false)}>
+            <div className="rules-panel glass fade-in" onClick={e => e.stopPropagation()}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <img src={logo} alt="Logo" className="sidebar-logo-img" style={{ marginRight: '10px' }} />
+                  <h2>Rule Management</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsRulesPanelOpen(false)}>
+                  <X size={24} />
                 </button>
-                <button className="action-btn" title="Close Panel" onClick={() => setIsCodePanelOpen(false)}>
+              </div>
+
+              <div className="panel-content">
+                <p className="panel-desc">Define instructions and behavioral constraints for the AI.</p>
+
+                <div className="rules-list">
+                  {rules.map(rule => (
+                    <div key={rule.id} className={`rule-card glass ${rule.status === 'active' ? 'enabled' : ''}`}>
+                      <div className="rule-info">
+                        <div className="rule-header">
+                          <h4>{rule.title}</h4>
+                          <span className={`rule-badge ${rule.category}`}>{rule.category}</span>
+                        </div>
+                        <p>{rule.description}</p>
+                      </div>
+                      <div className="rule-action">
+                        {user && user.ruleaccess?.toLowerCase() === 'admin' ? (
+                          <div className="admin-actions">
+                            <button
+                              className="rule-icon-btn delete"
+                              title="Delete Rule"
+                              onClick={() => handleDeleteRule(rule.id)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                            <label className="switch">
+                              <input
+                                type="checkbox"
+                                checked={rule.status === 'active'}
+                                onChange={() => toggleRule(rule.id, rule.status)}
+                              />
+                              <span className="slider"></span>
+                            </label>
+                          </div>
+                        ) : (
+                          <span className={`status-badge ${rule.status}`}>
+                            {rule.status === 'active' ? 'Enabled' : 'Disabled'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {user && user.ruleaccess?.toLowerCase() === 'admin' && (
+                  <button className="add-rule-btn glass" onClick={() => setIsAddRuleModalOpen(true)}>
+                    <Plus size={18} />
+                    <span>Add New Rule</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Add Rule Modal */}
+      {
+        isAddRuleModalOpen && (
+          <div className="panel-overlay" onClick={() => setIsAddRuleModalOpen(false)}>
+            <div className="rules-panel add-rule-modal glass fade-in" onClick={e => e.stopPropagation()}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <img src={logo} alt="Logo" className="sidebar-logo-img" style={{ marginRight: '10px' }} />
+                  <h2>Create Custom Rule</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsAddRuleModalOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="panel-content">
+                <div className="form-group">
+                  <label>Title</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Python Specialist"
+                    value={newRule.title}
+                    onChange={e => setNewRule({ ...newRule, title: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Category</label>
+                  <select
+                    value={newRule.category}
+                    onChange={e => setNewRule({ ...newRule, category: e.target.value })}
+                  >
+                    <option value="logic">Logic</option>
+                    <option value="style">Style</option>
+                    <option value="security">Security</option>
+                    <option value="infrastructure">Infrastructure</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Short Description</label>
+                  <input
+                    type="text"
+                    placeholder="Brief objective of the rule"
+                    value={newRule.description}
+                    onChange={e => setNewRule({ ...newRule, description: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Rule Content (Markdown format instructions)</label>
+                  <textarea
+                    placeholder="Detailed AI instructions..."
+                    rows={6}
+                    value={newRule.rule_content}
+                    onChange={e => setNewRule({ ...newRule, rule_content: e.target.value })}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button className="cancel-btn" onClick={() => setIsAddRuleModalOpen(false)}>Cancel</button>
+                  <button className="save-rule-btn" onClick={handleAddRule}>Save Rule & Generate MD</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+      {/* Lightbox for image preview */}
+      {
+        previewImage && (
+          <div className="lightbox-overlay fade-in" onClick={() => setPreviewImage(null)}>
+            <button className="lightbox-close" onClick={() => setPreviewImage(null)}>
+              <X size={32} />
+            </button>
+            <img src={previewImage} alt="Preview" className="lightbox-image" onClick={e => e.stopPropagation()} />
+          </div>
+        )
+      }
+
+      {/* Mobile/Plugin History Drawer - Refined Sliding Drawer */}
+      {
+        isMobileHistoryOpen && (isMobile || isPluginMode) && (
+          <div className="panel-overlay drawer-overlay fade-in" onClick={() => setIsMobileHistoryOpen(false)}>
+            <div className="mobile-history-panel refined-drawer slideInLeft" onClick={e => e.stopPropagation()}>
+              <div className="drawer-header">
+                <div className="drawer-title-section">
+                  <History size={20} className="accent-icon" />
+                  <div>
+                    <h3>Chat History</h3>
+                    <p className="drawer-subtitle">{conversations.length} sessions</p>
+                  </div>
+                </div>
+                <button className="close-btn-mini" onClick={() => setIsMobileHistoryOpen(false)}>
                   <X size={20} />
                 </button>
               </div>
-            </div>
-            <div className="canvas-content">
-              <Editor
-                height="100%"
-                defaultLanguage="python"
-                theme="vs-dark"
-                value={activeCode}
-                options={{
-                  readOnly: true,
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  fontFamily: 'JetBrains Mono',
-                  scrollBeyondLastLine: false,
-                  padding: { top: 20 }
-                }}
-              />
-            </div>
-          </aside>
-        </>
-      )}
 
-      {/* Rules Panel Overlay */}
-      {isRulesPanelOpen && (
-        <div className="panel-overlay" onClick={() => setIsRulesPanelOpen(false)}>
-          <div className="rules-panel glass fade-in" onClick={e => e.stopPropagation()}>
-            <div className="panel-header">
-              <div className="header-title">
-                <img src={logo} alt="Logo" className="sidebar-logo-img" style={{ marginRight: '10px' }} />
-                <h2>Rule Management</h2>
-              </div>
-              <button className="close-btn" onClick={() => setIsRulesPanelOpen(false)}>
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="panel-content">
-              <p className="panel-desc">Define instructions and behavioral constraints for the AI.</p>
-
-              <div className="rules-list">
-                {rules.map(rule => (
-                  <div key={rule.id} className={`rule-card glass ${rule.status === 'active' ? 'enabled' : ''}`}>
-                    <div className="rule-info">
-                      <div className="rule-header">
-                        <h4>{rule.title}</h4>
-                        <span className={`rule-badge ${rule.category}`}>{rule.category}</span>
-                      </div>
-                      <p>{rule.description}</p>
-                    </div>
-                    <div className="rule-action">
-                      {user && user.ruleaccess?.toLowerCase() === 'admin' ? (
-                        <div className="admin-actions">
-                          <button
-                            className="rule-icon-btn delete"
-                            title="Delete Rule"
-                            onClick={() => handleDeleteRule(rule.id)}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                          <label className="switch">
-                            <input
-                              type="checkbox"
-                              checked={rule.status === 'active'}
-                              onChange={() => toggleRule(rule.id, rule.status)}
-                            />
-                            <span className="slider"></span>
-                          </label>
-                        </div>
-                      ) : (
-                        <span className={`status-badge ${rule.status}`}>
-                          {rule.status === 'active' ? 'Enabled' : 'Disabled'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {user && user.ruleaccess?.toLowerCase() === 'admin' && (
-                <button className="add-rule-btn glass" onClick={() => setIsAddRuleModalOpen(true)}>
-                  <Plus size={18} />
-                  <span>Add New Rule</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Rule Modal */}
-      {isAddRuleModalOpen && (
-        <div className="panel-overlay" onClick={() => setIsAddRuleModalOpen(false)}>
-          <div className="rules-panel add-rule-modal glass fade-in" onClick={e => e.stopPropagation()}>
-            <div className="panel-header">
-              <div className="header-title">
-                <img src={logo} alt="Logo" className="sidebar-logo-img" style={{ marginRight: '10px' }} />
-                <h2>Create Custom Rule</h2>
-              </div>
-              <button className="close-btn" onClick={() => setIsAddRuleModalOpen(false)}>
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="panel-content">
-              <div className="form-group">
-                <label>Title</label>
-                <input
-                  type="text"
-                  placeholder="e.g., Python Specialist"
-                  value={newRule.title}
-                  onChange={e => setNewRule({ ...newRule, title: e.target.value })}
-                />
-              </div>
-              <div className="form-group">
-                <label>Category</label>
-                <select
-                  value={newRule.category}
-                  onChange={e => setNewRule({ ...newRule, category: e.target.value })}
+              <div className="drawer-actions">
+                <button
+                  className="new-chat-btn-compact glass"
+                  onClick={() => {
+                    handleNewChat()
+                    setIsMobileHistoryOpen(false)
+                  }}
                 >
-                  <option value="logic">Logic</option>
-                  <option value="style">Style</option>
-                  <option value="security">Security</option>
-                  <option value="infrastructure">Infrastructure</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Short Description</label>
-                <input
-                  type="text"
-                  placeholder="Brief objective of the rule"
-                  value={newRule.description}
-                  onChange={e => setNewRule({ ...newRule, description: e.target.value })}
-                />
-              </div>
-              <div className="form-group">
-                <label>Rule Content (Markdown format instructions)</label>
-                <textarea
-                  placeholder="Detailed AI instructions..."
-                  rows={6}
-                  value={newRule.rule_content}
-                  onChange={e => setNewRule({ ...newRule, rule_content: e.target.value })}
-                />
+                  <Plus size={16} />
+                  <span>New Conversation</span>
+                </button>
+                {conversations.length > 0 && (
+                  <button
+                    className="delete-all-btn-mobile glass"
+                    onClick={handleDeleteAllHistory}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </div>
 
-              <div className="modal-actions">
-                <button className="cancel-btn" onClick={() => setIsAddRuleModalOpen(false)}>Cancel</button>
-                <button className="save-rule-btn" onClick={handleAddRule}>Save Rule & Generate MD</button>
+              <div className="drawer-content scrollable-list">
+                {conversations.length > 0 ? (
+                  Object.entries(groupConversationsByDate(conversations)).map(([group, chats]) => (
+                    <div key={group} className="history-group">
+                      <div className="group-header">{group}</div>
+                      <div className="group-items">
+                        {chats.map(conv => (
+                          <div
+                            key={conv.id}
+                            className={`history-item-compact glass ${activeChatId === conv.id ? 'active' : ''} ${conv.is_pinned ? 'pinned' : ''}`}
+                            onClick={() => {
+                              if (editingChatId !== conv.id) {
+                                fetchChatMessages(conv.id)
+                                setIsMobileHistoryOpen(false)
+                              }
+                            }}
+                          >
+                            <div className="item-main">
+                              <MessageSquare size={14} className="item-icon" />
+                              <div className="item-text">
+                                {editingChatId === conv.id ? (
+                                  <input
+                                    className="compact-edit-input"
+                                    value={editTitle}
+                                    autoFocus
+                                    onChange={(e) => setEditTitle(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleRenameChat(e, conv.id)
+                                      if (e.key === 'Escape') setEditingChatId(null)
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <span className="item-title">{getFriendlyTitle(conv.title)}</span>
+                                )}
+                                <span className="item-time">
+                                  {new Date(conv.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="item-actions">
+                              <button
+                                className={`mini-action-btn ${conv.is_pinned ? 'active' : ''}`}
+                                onClick={(e) => handlePinChat(e, conv.id, conv.is_pinned)}
+                                title={conv.is_pinned ? "Unpin" : "Pin"}
+                              >
+                                <Pin size={12} fill={conv.is_pinned ? "currentColor" : "none"} />
+                              </button>
+                              {editingChatId === conv.id ? (
+                                <button className="mini-action-btn success" onClick={(e) => handleRenameChat(e, conv.id)}>
+                                  <Check size={14} />
+                                </button>
+                              ) : (
+                                <>
+                                  <button className="mini-action-btn" onClick={(e) => {
+                                    e.stopPropagation()
+                                    setEditingChatId(conv.id)
+                                    setEditTitle(conv.title)
+                                  }}>
+                                    <Edit2 size={12} />
+                                  </button>
+                                  <button className="mini-action-btn delete" onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDeleteChat(e, conv.id)
+                                  }}>
+                                    <Trash2 size={12} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="drawer-empty-state">
+                    <History size={40} className="muted-icon" />
+                    <p>No chat history yet</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        </div>
-      )}
-      {/* Lightbox for image preview */}
-      {previewImage && (
-        <div className="lightbox-overlay fade-in" onClick={() => setPreviewImage(null)}>
-          <button className="lightbox-close" onClick={() => setPreviewImage(null)}>
-            <X size={32} />
-          </button>
-          <img src={previewImage} alt="Preview" className="lightbox-image" onClick={e => e.stopPropagation()} />
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   )
 }
 
+
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'))
+  const [isPluginMode, setIsPluginMode] = useState(false)
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const token = storage.get('token')
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      return true
+    }
+    return false
+  })
+  const [isInitialized, setIsInitialized] = useState(false)
 
   const handleLogin = () => {
     setIsAuthenticated(true)
   }
 
-  // Inject token into API on mount if exists
+  // Handle initialization and parameters
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+    try {
+      const searchParams = new URLSearchParams(window.location.search)
+      const hashParams = new URLSearchParams(window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '')
+
+      // 1. Detect Plugin Mode (v3 - Check both search and hash)
+      const isPlugin = searchParams.get('isPlugin') === 'true' ||
+        searchParams.get('plugin') === 'true' ||
+        hashParams.get('isPlugin') === 'true' ||
+        hashParams.get('plugin') === 'true' ||
+        window.location.href.includes('plugin=true')
+
+      console.log("Detecting Plugin Mode:", { isPlugin, href: window.location.href })
+      if (isPlugin) setIsPluginMode(true)
+
+      // 2. Handle Auto-Authentication Token
+      const urlToken = searchParams.get('token') || hashParams.get('token')
+      if (urlToken) {
+        storage.set('token', urlToken)
+        api.defaults.headers.common['Authorization'] = `Bearer ${urlToken}`
+        setIsAuthenticated(true)
+      } else {
+        const savedToken = storage.get('token')
+        if (savedToken) {
+          api.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`
+          setIsAuthenticated(true)
+        }
+      }
+    } catch (e) {
+      console.error("App initialization failed:", e)
+    } finally {
+      setIsInitialized(true)
     }
   }, [])
 
+  if (!isInitialized) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0c', color: 'white' }}>
+        <Loader2 className="animate-spin" size={40} />
+      </div>
+    )
+  }
+
   return (
-    <Router>
-      <Routes>
-        <Route
-          path="/login"
-          element={isAuthenticated ? <Navigate to="/" /> : <Login onLogin={handleLogin} />}
-        />
-        <Route
-          path="/"
-          element={isAuthenticated ? <Chatbot /> : <Navigate to="/login" />}
-        />
-        <Route path="*" element={<Navigate to={isAuthenticated ? "/" : "/login"} />} />
-      </Routes>
-    </Router>
+    <ErrorBoundary>
+      <div className={`app-root-wrapper ${isPluginMode ? 'is-plugin' : ''}`} style={{ minHeight: '100vh', background: isPluginMode ? 'transparent' : '#0a0a0c' }}>
+        <Router>
+          <Routes>
+            <Route
+              path="/login"
+              element={isAuthenticated ? <Navigate to={`/${window.location.search || ''}`} /> : <Login onLogin={handleLogin} isPluginMode={isPluginMode} />}
+            />
+            <Route
+              path="/"
+              element={isAuthenticated ?
+                <Chatbot isMobile={isMobile} setIsMobile={setIsMobile} isPluginMode={isPluginMode} setIsPluginMode={setIsPluginMode} /> :
+                <Navigate to={`/login${window.location.search || ''}`} />
+              }
+            />
+            <Route path="*" element={<Navigate to={isAuthenticated ? `/${window.location.search || ''}` : `/login${window.location.search || ''}`} />} />
+          </Routes>
+        </Router>
+        {/* Hidden debug marker */}
+        <div id="app-initialized-marker" style={{ display: 'none' }}>ready</div>
+      </div>
+    </ErrorBoundary>
   )
+}
+
+// Robust Error Boundary
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0a0a0c', color: 'white', padding: '2rem', textAlign: 'center' }}>
+          <h1>Something went wrong</h1>
+          <p>The application encountered an unexpected error.</p>
+          <pre style={{ background: '#1a1a1c', padding: '1rem', borderRadius: '8px', color: '#ef4444', maxWidth: '100%', overflow: 'auto', textAlign: 'left' }}>
+            {this.state.error?.toString()}
+          </pre>
+          <button onClick={() => window.location.reload()} style={{ marginTop: '1rem', padding: '0.6rem 2rem', borderRadius: '12px', background: 'var(--accent-primary, #7c3aed)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>
+            Reload Page
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default App

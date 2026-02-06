@@ -15,8 +15,9 @@
   --glass-border: rgba(255, 255, 255, 0.1);
   --card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  line-height: 1.5;
+  line-height: 1.4;
   font-weight: 400;
+  letter-spacing: -0.011em;
 
   color-scheme: dark;
   color: var(--text-primary);

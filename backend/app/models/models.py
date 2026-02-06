@@ -28,6 +28,7 @@ class Chat(Base):
     title = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(String(255), ForeignKey("USER.username"))
+    is_pinned = Column(Boolean, default=False)
 
     owner = relationship("User", back_populates="chats")
     messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")

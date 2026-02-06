@@ -4,7 +4,7 @@ import api from '../services/api'
 import logo from '../assets/logo.png'
 import './Login.css'
 
-function Login({ onLogin }) {
+function Login({ onLogin, isPluginMode }) {
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
@@ -26,7 +26,11 @@ function Login({ onLogin }) {
             const response = await api.post('/auth/login', formData)
 
             const { access_token } = response.data
-            localStorage.setItem('token', access_token)
+            try {
+                localStorage.setItem('token', access_token)
+            } catch (e) {
+                console.warn('LocalStorage write blocked in Login:', e)
+            }
             api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
 
             onLogin()
@@ -39,11 +43,11 @@ function Login({ onLogin }) {
     }
 
     return (
-        <div className="login-container">
+        <div className={`login-container ${isPluginMode ? 'is-plugin' : ''}`} style={isPluginMode ? { background: '#0a0a0c', minHeight: '100vh' } : {}}>
             <div className="login-blob"></div>
             <div className="login-blob blob-2"></div>
 
-            <div className="login-card glass fade-in">
+            <div className="login-card glass fade-in" style={isPluginMode ? { background: '#1c1c1e', opacity: 1, visibility: 'visible' } : {}}>
                 <div className="login-header">
                     <div className="login-logo">
                         <img src={logo} alt="Logo" className="login-logo-img" />
