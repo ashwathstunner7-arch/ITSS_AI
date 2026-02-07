@@ -466,15 +466,18 @@
   border: 1px solid var(--glass-border);
 }
 
-.message-content p {
+.message-content p,
+.markdown-paragraph {
   margin: 0.5rem 0;
 }
 
-.message-content p:first-child {
+.message-content p:first-child,
+.markdown-paragraph:first-child {
   margin-top: 0;
 }
 
-.message-content p:last-child {
+.message-content p:last-child,
+.markdown-paragraph:last-child {
   margin-bottom: 0;
 }
 
@@ -790,6 +793,13 @@ textarea:focus {
   margin-left: 0 !important;
   display: flex;
   flex-direction: column;
+}
+
+.is-mobile .code-canvas-panel,
+.is-plugin .code-canvas-panel,
+.is-mobile .code-panel-resizer,
+.is-plugin .code-panel-resizer {
+  display: none !important;
 }
 
 .is-mobile .chat-header,

@@ -706,6 +706,9 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
+            p({ children }) {
+              return <div className="markdown-paragraph">{children}</div>
+            },
             code({ node, inline, className, children, ...props }) {
               const match = /language-(\w+)/.exec(className || '')
               const language = match ? match[1] : ''
@@ -713,6 +716,7 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
 
               return !inline ? (
                 <div className="code-block-container" onClick={(e) => {
+                  if (isMobile || isPluginMode) return;
                   e.stopPropagation()
                   setActiveCode(codeString)
                   setIsCodePanelOpen(true)
