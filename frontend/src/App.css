@@ -2050,19 +2050,36 @@ input:checked+.slider:before {
 .panel-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
+  animation: fadeIn 0.3s ease-out;
 }
 
-/* Custom Rule Modal */
+/* Custom Rule Modal Refinement */
 .add-rule-modal {
   max-width: 600px !important;
   width: 90%;
+  height: auto !important;
+  max-height: 90vh;
   border: 1px solid var(--glass-border) !important;
+  position: relative;
+  border-radius: 24px !important;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.add-rule-modal .panel-header {
+  padding: 1.25rem 1.5rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.add-rule-modal .panel-content {
+  padding: 1.5rem;
+  overflow-y: auto;
 }
 
 .form-group {
@@ -2097,7 +2114,13 @@ input:checked+.slider:before {
   outline: none;
   border-color: var(--accent-primary);
   background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 0 20px rgba(124, 58, 237, 0.15);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15);
+}
+
+.form-group select option {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 10px;
 }
 
 .modal-actions {
