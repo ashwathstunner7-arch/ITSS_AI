@@ -1,9 +1,11 @@
-# Quantum Frontend
+# Visuvalizer Gudilines1
 
-**Type:** logic
-**Description:** Kony Defined Language
+**Category:** logic
+**Version:** 1.0
+**Priority:** medium
+**Description:** 
 
-## Instructions
+## Rule Content
 
 # Visualizer Development Guidelines
 

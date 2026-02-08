@@ -25,7 +25,7 @@ class GeminiProvider(BaseAIProvider):
             except Exception as e:
                 print(f"Warning: Could not list Gemini models: {e}")
         
-        self.default_model = "gemini-1.5-flash"
+        self.default_model = "gemini-2.5-flash"
 
     async def generate_response(self, prompt: str, history: List[Dict[str, Any]] = None, model: str = None, attachments: List[Dict[str, Any]] = None) -> str:
         try:
@@ -45,7 +45,7 @@ class GeminiProvider(BaseAIProvider):
                     flash_fallback = [m for m in self.available_models if "flash" in m]
                     full_model_name = flash_fallback[0] if flash_fallback else self.available_models[0]
             elif not self.available_models:
-                full_model_name = "models/gemini-1.5-flash-latest" 
+                full_model_name = "models/gemini-2.5-flash" 
 
             chat_model = genai.GenerativeModel(full_model_name)
             
@@ -58,7 +58,15 @@ class GeminiProvider(BaseAIProvider):
                     formatted_history.append({"role": role, "parts": h["parts"]})
             
             # Prepare message parts (text + images)
-            message_parts = [prompt]
+            full_prompt = prompt
+            if attachments:
+                import base64
+                for at in attachments:
+                    if at.get("type") == "file" and "content" in at:
+                        # Append text file content to the prompt
+                        full_prompt += f"\n\n--- FILE: {at.get('name')} ---\n{at['content']}\n--- END FILE ---"
+            
+            message_parts = [full_prompt]
             if attachments:
                 import base64
                 for at in attachments:
@@ -97,7 +105,7 @@ class GeminiProvider(BaseAIProvider):
                     flash_fallback = [m for m in self.available_models if "flash" in m]
                     full_model_name = flash_fallback[0] if flash_fallback else self.available_models[0]
             elif not self.available_models:
-                full_model_name = "models/gemini-1.5-flash-latest"
+                full_model_name = "models/gemini-2.5-flash"
 
             chat_model = genai.GenerativeModel(full_model_name)
             
@@ -108,7 +116,13 @@ class GeminiProvider(BaseAIProvider):
                     role = "user" if h["role"] == "user" else "model"
                     formatted_history.append({"role": role, "parts": h["parts"]})
 
-            message_parts = [prompt]
+            full_prompt = prompt
+            if attachments:
+                for at in attachments:
+                    if at.get("type") == "file" and "content" in at:
+                        full_prompt += f"\n\n--- FILE: {at.get('name')} ---\n{at['content']}\n--- END FILE ---"
+
+            message_parts = [full_prompt]
             if attachments:
                 import base64
                 for at in attachments:
@@ -150,7 +164,13 @@ class OpenAIProvider(BaseAIProvider):
                 for h in history:
                     messages.append({"role": h["role"], "content": h["parts"][0] if isinstance(h["parts"], list) else h["parts"]})
             
-            user_content = [{"type": "text", "text": prompt}]
+            full_prompt = prompt
+            if attachments:
+                for at in attachments:
+                    if at.get("type") == "file" and "content" in at:
+                        full_prompt += f"\n\n--- FILE: {at.get('name')} ---\n{at['content']}\n--- END FILE ---"
+
+            user_content = [{"type": "text", "text": full_prompt}]
             if attachments:
                 for at in attachments:
                     if at.get("type") == "image" and "content" in at:
@@ -180,7 +200,13 @@ class OpenAIProvider(BaseAIProvider):
                 for h in history:
                     messages.append({"role": h["role"], "content": h["parts"][0] if isinstance(h["parts"], list) else h["parts"]})
             
-            user_content = [{"type": "text", "text": prompt}]
+            full_prompt = prompt
+            if attachments:
+                for at in attachments:
+                    if at.get("type") == "file" and "content" in at:
+                        full_prompt += f"\n\n--- FILE: {at.get('name')} ---\n{at['content']}\n--- END FILE ---"
+
+            user_content = [{"type": "text", "text": full_prompt}]
             if attachments:
                 for at in attachments:
                     if at.get("type") == "image" and "content" in at:

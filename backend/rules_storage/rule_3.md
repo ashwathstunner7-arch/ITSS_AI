@@ -1,9 +1,9 @@
-# Quantom Frontend - Accesiblity
+# Vis Gudilines
 
 **Category:** logic
 **Version:** 1.0
 **Priority:** medium
-**Description:** Temenos Kony Frontend Guidlines
+**Description:** 
 
 ## Rule Content
 

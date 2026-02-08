@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api import auth, tenant, manifest, spell, invoke, rules, chats, messages
+from app.api import auth, tenant, manifest, spell, invoke, rules, chats, messages, prompts
 from app.core.config import settings
 
 from app.core.database import engine, Base
@@ -53,6 +53,7 @@ app.include_router(invoke.router, prefix="/invoke", tags=["AI Execution"])
 app.include_router(rules.router, prefix="/rules", tags=["Rule Management"])
 app.include_router(chats.router, prefix="/chats", tags=["Chat History"])
 app.include_router(messages.router, prefix="/messages", tags=["Message Operations"])
+app.include_router(prompts.router, prefix="/prompts", tags=["Prompt Management"])
 
 @app.get("/")
 @app.head("/")

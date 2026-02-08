@@ -32,7 +32,11 @@ import {
   Clock,
   History,
   Pin,
-  Pencil
+  Pencil,
+  Bookmark,
+  Users,
+  Star,
+  Search
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import api from './services/api'
@@ -84,6 +88,8 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 768)
   const [isRulesPanelOpen, setIsRulesPanelOpen] = useState(false)
   const [isTaggingRulesOpen, setIsTaggingRulesOpen] = useState(false)
+  const [ruleSearchQuery, setRuleSearchQuery] = useState('')
+  const [expandedReferences, setExpandedReferences] = useState({})
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false)
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -109,6 +115,16 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const [previewImage, setPreviewImage] = useState(null)
   const [streamingMessageId, setStreamingMessageId] = useState(null)
   const [isMobileHistoryOpen, setIsMobileHistoryOpen] = useState(false)
+  const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false)
+  const [isSharedPromptsOpen, setIsSharedPromptsOpen] = useState(false)
+  const [myPrompts, setMyPrompts] = useState([])
+  const [sharedPrompts, setSharedPrompts] = useState([])
+  const [isAddPromptModalOpen, setIsAddPromptModalOpen] = useState(false)
+  const [isAddSharedPromptModalOpen, setIsAddSharedPromptModalOpen] = useState(false)
+  const [newPrompt, setNewPrompt] = useState({ title: '', content: '' })
+  const [newSharedPrompt, setNewSharedPrompt] = useState({ title: '', content: '' })
+  const [editingPromptId, setEditingPromptId] = useState(null)
+  const [editingSharedPromptId, setEditingSharedPromptId] = useState(null)
 
   const fileInputRef = useRef(null)
   const folderInputRef = useRef(null)
@@ -116,14 +132,13 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const inputRef = useRef(null)
 
   const [selectedModel, setSelectedModel] = useState({
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash',
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
     provider: 'gemini'
   })
 
   const availableModels = [
-    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'gemini' },
-    { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'gemini' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'gemini' },
     { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' },
     { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai' },
   ]
@@ -150,6 +165,8 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
     fetchUserData()
     fetchRules()
     fetchChats()
+    fetchMyPrompts()
+    fetchSharedPrompts()
 
     const handleResize = () => {
       const mobile = window.innerWidth <= 768
@@ -231,6 +248,24 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
       setConversations(response.data)
     } catch (error) {
       console.error("Failed to fetch chats:", error)
+    }
+  }
+
+  const fetchMyPrompts = async () => {
+    try {
+      const response = await api.get('/prompts/my')
+      setMyPrompts(response.data)
+    } catch (error) {
+      console.error("Failed to fetch my prompts:", error)
+    }
+  }
+
+  const fetchSharedPrompts = async () => {
+    try {
+      const response = await api.get('/prompts/shared')
+      setSharedPrompts(response.data)
+    } catch (error) {
+      console.error("Failed to fetch shared prompts:", error)
     }
   }
 
@@ -370,6 +405,10 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
 
   const removeAttachedRule = (ruleId) => {
     setAttachedRules(prev => prev.filter(id => id !== ruleId))
+  }
+
+  const toggleReferences = (msgId) => {
+    setExpandedReferences(prev => ({ ...prev, [msgId]: !prev[msgId] }))
   }
 
   const consumeStream = async (response, tempBotId) => {
@@ -695,6 +734,115 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
     }
   }
 
+  const handleAddPrompt = async () => {
+    if (!newPrompt.title.trim() || !newPrompt.content.trim()) return
+    try {
+      const response = await api.post('/prompts/my', newPrompt)
+      setMyPrompts([...myPrompts, response.data])
+      setNewPrompt({ title: '', content: '' })
+      setIsAddPromptModalOpen(false)
+    } catch (error) {
+      console.error("Failed to add prompt:", error)
+      if (error.response?.data?.detail) {
+        alert(error.response.data.detail)
+      } else {
+        alert("Failed to add prompt. Storage limit might be reached.")
+      }
+    }
+  }
+
+  const handleBookmarkMessage = async (msg) => {
+    // Find if message is already bookmarked
+    const existingPrompt = myPrompts.find(p => p.content.includes(msg.content))
+
+    if (existingPrompt) {
+      // Unsave (Delete)
+      try {
+        await api.delete(`/prompts/my/${existingPrompt.id}`)
+        setMyPrompts(myPrompts.filter(p => p.id !== existingPrompt.id))
+      } catch (error) {
+        console.error("Failed to remove bookmark:", error)
+        alert("Failed to remove bookmark.")
+      }
+    } else {
+      // Save (Create)
+      try {
+        let content = msg.content;
+        if (msg.attachments && msg.attachments.length > 0) {
+          const attachmentNames = msg.attachments.map(a => a.name).join(', ');
+          content += `\n\n[Attachments: ${attachmentNames}]`;
+        }
+
+        const newPromptData = {
+          title: `Saved from Chat - ${new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`,
+          content: content
+        }
+
+        const response = await api.post('/prompts/my', newPromptData)
+        setMyPrompts([...myPrompts, response.data])
+      } catch (error) {
+        console.error("Failed to bookmark message:", error)
+        if (error.response?.data?.detail) {
+          alert(error.response.data.detail)
+        } else {
+          alert("Failed to save prompt. Limit might be reached.")
+        }
+      }
+    }
+  }
+
+  const handleUpdatePrompt = async (id, updatedData) => {
+    try {
+      const response = await api.patch(`/prompts/my/${id}`, updatedData)
+      setMyPrompts(myPrompts.map(p => p.id === id ? response.data : p))
+      setEditingPromptId(null)
+    } catch (error) {
+      console.error("Failed to update prompt:", error)
+    }
+  }
+
+  const handleDeletePrompt = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this prompt?")) return
+    try {
+      await api.delete(`/prompts/my/${id}`)
+      setMyPrompts(myPrompts.filter(p => p.id !== id))
+    } catch (error) {
+      console.error("Failed to delete prompt:", error)
+    }
+  }
+
+  const handleAddSharedPrompt = async () => {
+    if (!newSharedPrompt.title.trim() || !newSharedPrompt.content.trim()) return
+    try {
+      const response = await api.post('/prompts/shared', newSharedPrompt)
+      setSharedPrompts([...sharedPrompts, response.data])
+      setNewSharedPrompt({ title: '', content: '' })
+      setIsAddSharedPromptModalOpen(false)
+    } catch (error) {
+      console.error("Failed to add shared prompt:", error)
+    }
+  }
+
+  const handleUpdateSharedPrompt = async (id, updatedData) => {
+    try {
+      const response = await api.patch(`/prompts/shared/${id}`, updatedData)
+      setSharedPrompts(sharedPrompts.map(p => p.id === id ? response.data : p))
+      setEditingSharedPromptId(null)
+    } catch (error) {
+      console.error("Failed to update shared prompt:", error)
+    }
+  }
+
+  const handleDeleteSharedPrompt = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this shared prompt?")) return
+    try {
+      await api.delete(`/prompts/shared/${id}`)
+      setSharedPrompts(sharedPrompts.filter(p => p.id !== id))
+    } catch (error) {
+      console.error("Failed to delete shared prompt:", error)
+    }
+  }
+
   const MessageContent = ({ content }) => {
     if (!content) return null
     // Strip [Attached ...] tags from the content
@@ -848,6 +996,14 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                 <Layout size={16} />
                 {isSidebarOpen && <span>Rule Management</span>}
               </div>
+              <div className={`conv-item ${isMyPromptsOpen ? 'active' : ''}`} onClick={() => setIsMyPromptsOpen(true)}>
+                <Bookmark size={16} />
+                {isSidebarOpen && <span>My Prompts</span>}
+              </div>
+              <div className={`conv-item ${isSharedPromptsOpen ? 'active' : ''}`} onClick={() => setIsSharedPromptsOpen(true)}>
+                <Users size={16} />
+                {isSidebarOpen && <span>Shared Prompts</span>}
+              </div>
             </div>
           </div>
 
@@ -892,41 +1048,91 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
               </h3>
             </div>
 
-            <div className="model-selector-wrapper">
-              <button
-                className="model-badge selector"
-                onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
-              >
-                <Cpu size={14} />
-                <span>{selectedModel.name}</span>
-                <ChevronDown size={14} className={isModelSelectorOpen ? 'rotate' : ''} />
-              </button>
+            {!isMobile && !isPluginMode && (
+              <div className="model-selector-wrapper header-model-selector desktop-version">
+                <button
+                  className="model-badge selector"
+                  onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
+                >
+                  <Cpu size={14} />
+                  <span>{selectedModel.name}</span>
+                  <ChevronDown size={14} className={isModelSelectorOpen ? 'rotate' : ''} />
+                </button>
 
-              {isModelSelectorOpen && (
-                <div className="model-dropdown glass fade-in">
-                  {availableModels.map(model => (
-                    <div
-                      key={model.id}
-                      className={`model-option ${selectedModel.id === model.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setSelectedModel(model)
-                        setIsModelSelectorOpen(false)
-                      }}
-                    >
-                      <div className="option-info">
-                        <span className="option-name">{model.name}</span>
-                        <span className="option-provider">{model.provider}</span>
+                {isModelSelectorOpen && (
+                  <div className="model-dropdown glass fade-in">
+                    {availableModels.map(model => (
+                      <div
+                        key={model.id}
+                        className={`model-option ${selectedModel.id === model.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelectedModel(model)
+                          setIsModelSelectorOpen(false)
+                        }}
+                      >
+                        <div className="option-info">
+                          <span className="option-name">{model.name}</span>
+                          <span className="option-provider">{model.provider}</span>
+                        </div>
+                        {selectedModel.id === model.id && <img src={logo} alt="selected" className="sidebar-logo-img small" style={{ width: '14px', height: '14px' }} />}
                       </div>
-                      {selectedModel.id === model.id && <img src={logo} alt="selected" className="sidebar-logo-img small" style={{ width: '14px', height: '14px' }} />}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="header-actions">
             {(isMobile || isPluginMode) && (
               <div className="mobile-header-controls">
+                <div className="model-selector-wrapper header-model-selector mobile-version">
+                  <button
+                    className="model-badge selector"
+                    onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}
+                  >
+                    <Cpu size={14} />
+                    <span>{selectedModel.name}</span>
+                    <ChevronDown size={14} className={isModelSelectorOpen ? 'rotate' : ''} />
+                  </button>
+
+                  {isModelSelectorOpen && (
+                    <div className="model-dropdown glass fade-in">
+                      {availableModels.map(model => (
+                        <div
+                          key={model.id}
+                          className={`model-option ${selectedModel.id === model.id ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedModel(model)
+                            setIsModelSelectorOpen(false)
+                          }}
+                        >
+                          <div className="option-info">
+                            <span className="option-name">{model.name}</span>
+                            <span className="option-provider">{model.provider}</span>
+                          </div>
+                          {selectedModel.id === model.id && <img src={logo} alt="selected" className="sidebar-logo-img small" style={{ width: '14px', height: '14px' }} />}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  className="mobile-nav-btn glass tool-btn"
+                  onClick={() => setIsMyPromptsOpen(true)}
+                  title="My Prompts"
+                >
+                  <Bookmark size={20} />
+                </button>
+
+                <button
+                  className="mobile-nav-btn glass tool-btn"
+                  onClick={() => setIsSharedPromptsOpen(true)}
+                  title="Shared Prompts"
+                >
+                  <Users size={20} />
+                </button>
+
                 <button
                   className="mobile-nav-btn glass history-btn"
                   onClick={() => setIsMobileHistoryOpen(true)}
@@ -934,9 +1140,9 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                 >
                   <Clock size={20} />
                 </button>
+
                 {user && (
-                  <div className="mobile-user-details">
-                    {!isPluginMode && <span className="mobile-username">{user.username}</span>}
+                  <div className="mobile-header-controls-group">
                     <button className="mobile-nav-btn logout glass" onClick={handleLogout} title="Logout">
                       <LogOut size={20} />
                     </button>
@@ -964,63 +1170,99 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                 <div className="message-icon">
                   {msg.role === 'bot' ? <img src={logo} alt="AI" className="bot-avatar-img" /> : <User size={20} />}
                 </div>
-                <div className={`message-bubble glass fade-in ${streamingMessageId === msg.id ? 'is-streaming' : ''}`}>
-                  {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="message-attachments-display">
-                      {msg.attachments.map((at, i) => (
-                        at.type === 'image' && (
-                          <img key={i} src={at.content} alt={at.name} className="bubble-image" />
-                        )
-                      ))}
-                    </div>
-                  )}
+                <div className="message-content-wrapper">
+                  <div className="message-bubble-row">
+                    <div className={`message-bubble glass fade-in ${streamingMessageId === msg.id ? 'is-streaming' : ''}`}>
+                      {editingMessageId === msg.id ? (
+                        <div className="message-edit-container">
+                          <textarea
+                            className="message-edit-textarea"
+                            value={editMessageContent}
+                            onChange={(e) => setEditMessageContent(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleEditMessage(msg.id);
+                              }
+                              if (e.key === 'Escape') {
+                                setEditingMessageId(null);
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <div className="edit-actions">
+                            <button className="save-btn" onClick={() => handleEditMessage(msg.id)}>
+                              Send
+                            </button>
+                            <button className="cancel-btn" onClick={() => setEditingMessageId(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <MessageContent content={msg.content} />
+                          {streamingMessageId === msg.id && <span className="streaming-cursor"></span>}
+                        </>
+                      )}
 
-                  {editingMessageId === msg.id ? (
-                    <div className="message-edit-container">
-                      <textarea
-                        className="message-edit-textarea"
-                        value={editMessageContent}
-                        onChange={(e) => setEditMessageContent(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleEditMessage(msg.id);
-                          }
-                          if (e.key === 'Escape') {
-                            setEditingMessageId(null);
-                          }
-                        }}
-                        autoFocus
-                      />
-                      <div className="edit-actions">
-                        <button className="save-btn" onClick={() => handleEditMessage(msg.id)}>
-                          Send
-                        </button>
-                        <button className="cancel-btn" onClick={() => setEditingMessageId(null)}>
-                          Cancel
-                        </button>
+                      <div className="message-time">
+                        <div className="message-actions-row">
+                          <button className="copy-btn" onClick={() => copyToClipboard(msg.content)} title="Copy message">
+                            <Copy size={12} /> Copy
+                          </button>
+                          {msg.role === 'user' && !editingMessageId && (
+                            <button className="copy-btn" onClick={() => startEditingMessage(msg)} title="Edit message">
+                              <Edit2 size={12} /> Edit
+                            </button>
+                          )}
+                        </div>
+                        {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                     </div>
-                  ) : (
-                    <>
-                      <MessageContent content={msg.content} />
-                      {streamingMessageId === msg.id && <span className="streaming-cursor"></span>}
-                    </>
-                  )}
 
-                  <div className="message-time">
-                    <div className="message-actions-row">
-                      <button className="copy-btn" onClick={() => copyToClipboard(msg.content)}>
-                        <Copy size={12} /> Copy
+                    {msg.role === 'user' && !editingMessageId && (
+                      <button
+                        className={`external-bookmark-btn ${myPrompts.some(p => p.content.includes(msg.content)) ? 'active-bookmark' : ''}`}
+                        onClick={() => handleBookmarkMessage(msg)}
+                        title={myPrompts.some(p => p.content.includes(msg.content)) ? "Remove bookmark" : "Save to My Prompts"}
+                      >
+                        <Bookmark
+                          size={18}
+                          fill={myPrompts.some(p => p.content.includes(msg.content)) ? "#ffcc00" : "none"}
+                          stroke={myPrompts.some(p => p.content.includes(msg.content)) ? "#ffcc00" : "currentColor"}
+                        />
                       </button>
-                      {msg.role === 'user' && !editingMessageId && (
-                        <button className="copy-btn" onClick={() => startEditingMessage(msg)}>
-                          <Edit2 size={12} /> Edit
-                        </button>
+                    )}
+                  </div>
+
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className={`message-attachments-display external ${expandedReferences[msg.id] ? 'expanded' : ''}`}>
+                      <button
+                        className="references-toggle"
+                        onClick={() => toggleReferences(msg.id)}
+                      >
+                        <div className="references-header">
+                          <ChevronDown size={14} className={`toggle-icon ${expandedReferences[msg.id] ? 'rotated' : ''}`} />
+                          REFERENCES
+                        </div>
+                      </button>
+                      {expandedReferences[msg.id] && (
+                        <div className="references-grid fade-in">
+                          {msg.attachments.map((at, i) => (
+                            at.type === 'image' ? (
+                              <img key={i} src={at.content} alt={at.name} className="bubble-image" />
+                            ) : (
+                              <div key={i} className="reference-file-chip">
+                                <FileText size={14} />
+                                <span className="file-name">{at.name}</span>
+                              </div>
+                            )
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -1132,24 +1374,49 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                   <div className="rules-tag-dropdown glass fade-in">
                     <div className="dropdown-header">
                       <span>Select Rules to Apply</span>
-                      <button onClick={() => setIsTaggingRulesOpen(false)}><X size={14} /></button>
+                      <button onClick={() => {
+                        setIsTaggingRulesOpen(false);
+                        setRuleSearchQuery('');
+                      }}><X size={14} /></button>
+                    </div>
+                    <div className="rules-search-bar">
+                      <Search size={14} className="search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search rules..."
+                        value={ruleSearchQuery}
+                        onChange={(e) => setRuleSearchQuery(e.target.value)}
+                        autoFocus
+                      />
                     </div>
                     <div className="rules-scrollable">
-                      {rules.map(rule => (
-                        <button
-                          key={rule.id}
-                          className={`rule-select-item ${attachedRules.includes(rule.id) ? 'selected' : ''}`}
-                          onClick={() => toggleAttachedRule(rule.id)}
-                        >
-                          <div className="rule-item-check">
-                            {attachedRules.includes(rule.id) ? <Check size={14} /> : <div className="dot" />}
-                          </div>
-                          <div className="rule-item-info">
-                            <span className="rule-title">{rule.title}</span>
-                            <span className="rule-type">{rule.category} v{rule.version}</span>
-                          </div>
-                        </button>
-                      ))}
+                      {rules
+                        .filter(rule =>
+                          rule.title.toLowerCase().includes(ruleSearchQuery.toLowerCase()) ||
+                          rule.category.toLowerCase().includes(ruleSearchQuery.toLowerCase())
+                        )
+                        .map(rule => (
+                          <button
+                            key={rule.id}
+                            className={`rule-select-item ${attachedRules.includes(rule.id) ? 'selected' : ''}`}
+                            onClick={() => toggleAttachedRule(rule.id)}
+                          >
+                            <div className="rule-item-check">
+                              {attachedRules.includes(rule.id) ? <Check size={14} /> : <div className="dot" />}
+                            </div>
+                            <div className="rule-item-info">
+                              <span className="rule-title">{rule.title}</span>
+                              <span className="rule-type">{rule.category} v{rule.version}</span>
+                            </div>
+                          </button>
+                        ))
+                      }
+                      {rules.filter(rule =>
+                        rule.title.toLowerCase().includes(ruleSearchQuery.toLowerCase()) ||
+                        rule.category.toLowerCase().includes(ruleSearchQuery.toLowerCase())
+                      ).length === 0 && (
+                          <div className="no-rules-found">No rules match your search.</div>
+                        )}
                     </div>
                   </div>
                 )}
@@ -1319,6 +1586,276 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                     <span>Add New Rule</span>
                   </button>
                 )}
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* My Prompts Panel Overlay */}
+      {
+        isMyPromptsOpen && (
+          <div className="panel-overlay" onClick={() => setIsMyPromptsOpen(false)}>
+            <div className="rules-panel glass fade-in" onClick={e => e.stopPropagation()}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <Folder size={24} style={{ marginRight: '10px' }} />
+                  <h2>My Prompts</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsMyPromptsOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="panel-content">
+                <p className="panel-desc">Store your personal high-quality prompts here.</p>
+
+                <div className="rules-list">
+                  {myPrompts.length === 0 && <p className="empty-msg">No personal prompts saved yet.</p>}
+                  {myPrompts.map(prompt => (
+                    <div key={prompt.id} className="rule-card glass enabled">
+                      <div className="rule-info">
+                        <div className="rule-header">
+                          <h4>{prompt.title}</h4>
+                        </div>
+                        <p>{prompt.content.length > 100 ? prompt.content.substring(0, 100) + '...' : prompt.content}</p>
+                      </div>
+                      <div className="rule-action">
+                        <div className="admin-actions">
+                          <button
+                            className="rule-icon-btn"
+                            title="Use Prompt"
+                            onClick={() => {
+                              setInput(prompt.content)
+                              setIsMyPromptsOpen(false)
+                            }}
+                          >
+                            <Send size={16} />
+                          </button>
+                          <button
+                            className="rule-icon-btn"
+                            title="Edit"
+                            onClick={() => {
+                              setEditingPromptId(prompt.id)
+                              setNewPrompt({ title: prompt.title, content: prompt.content })
+                              setIsAddPromptModalOpen(true)
+                            }}
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            className="rule-icon-btn delete"
+                            title="Delete"
+                            onClick={() => handleDeletePrompt(prompt.id)}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button className="add-rule-btn glass" onClick={() => {
+                  setEditingPromptId(null)
+                  setNewPrompt({ title: '', content: '' })
+                  setIsAddPromptModalOpen(true)
+                }}>
+                  <Plus size={18} />
+                  <span>Add New Prompt</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Shared Prompts Panel Overlay */}
+      {
+        isSharedPromptsOpen && (
+          <div className="panel-overlay" onClick={() => setIsSharedPromptsOpen(false)}>
+            <div className="rules-panel glass fade-in" onClick={e => e.stopPropagation()}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <Users size={24} style={{ marginRight: '10px' }} />
+                  <h2>Shared Prompts</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsSharedPromptsOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="panel-content">
+                <p className="panel-desc">Team prompts curated by admins.</p>
+
+                <div className="rules-list">
+                  {sharedPrompts.length === 0 && <p className="empty-msg">No shared prompts available.</p>}
+                  {sharedPrompts.map(prompt => (
+                    <div key={prompt.id} className="rule-card glass enabled">
+                      <div className="rule-info">
+                        <div className="rule-header">
+                          <h4>{prompt.title}</h4>
+                          <span className="rule-badge logic">Shared</span>
+                        </div>
+                        <p>{prompt.content.length > 100 ? prompt.content.substring(0, 100) + '...' : prompt.content}</p>
+                        <span className="item-time">By {prompt.created_by}</span>
+                      </div>
+                      <div className="rule-action">
+                        <div className="admin-actions">
+                          <button
+                            className="rule-icon-btn"
+                            title="Use Prompt"
+                            onClick={() => {
+                              setInput(prompt.content)
+                              setIsSharedPromptsOpen(false)
+                            }}
+                          >
+                            <Send size={16} />
+                          </button>
+                          {user && user.ruleaccess?.toLowerCase() === 'admin' && (
+                            <>
+                              <button
+                                className="rule-icon-btn"
+                                title="Edit"
+                                onClick={() => {
+                                  setEditingSharedPromptId(prompt.id)
+                                  setNewSharedPrompt({ title: prompt.title, content: prompt.content })
+                                  setIsAddSharedPromptModalOpen(true)
+                                }}
+                              >
+                                <Edit2 size={16} />
+                              </button>
+                              <button
+                                className="rule-icon-btn delete"
+                                title="Delete"
+                                onClick={() => handleDeleteSharedPrompt(prompt.id)}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {user && user.ruleaccess?.toLowerCase() === 'admin' && (
+                  <button className="add-rule-btn glass" onClick={() => {
+                    setEditingSharedPromptId(null)
+                    setNewSharedPrompt({ title: '', content: '' })
+                    setIsAddSharedPromptModalOpen(true)
+                  }}>
+                    <Plus size={18} />
+                    <span>Add Shared Prompt</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Add/Edit Prompt Modal */}
+      {
+        isAddPromptModalOpen && (
+          <div className="panel-overlay" onClick={() => setIsAddPromptModalOpen(false)}>
+            <div className="rules-panel add-rule-modal glass fade-in" onClick={e => e.stopPropagation()}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <Folder size={24} style={{ marginRight: '10px' }} />
+                  <h2>{editingPromptId ? 'Edit Prompt' : 'Add New Prompt'}</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsAddPromptModalOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="panel-content">
+                <div className="form-group">
+                  <label>Title</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Code Reviewer"
+                    value={newPrompt.title}
+                    onChange={e => setNewPrompt({ ...newPrompt, title: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Prompt Content</label>
+                  <textarea
+                    placeholder="Detailed prompt instructions..."
+                    rows={8}
+                    value={newPrompt.content}
+                    onChange={e => setNewPrompt({ ...newPrompt, content: e.target.value })}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button className="cancel-btn" onClick={() => setIsAddPromptModalOpen(false)}>Cancel</button>
+                  <button className="save-rule-btn" onClick={() => {
+                    if (editingPromptId) {
+                      handleUpdatePrompt(editingPromptId, newPrompt)
+                    } else {
+                      handleAddPrompt()
+                    }
+                  }}>
+                    {editingPromptId ? 'Update Prompt' : 'Save Prompt'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Add/Edit Shared Prompt Modal */}
+      {
+        isAddSharedPromptModalOpen && (
+          <div className="panel-overlay" onClick={() => setIsAddSharedPromptModalOpen(false)}>
+            <div className="rules-panel add-rule-modal glass fade-in" onClick={e => e.stopPropagation()}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <ShieldCheck size={24} style={{ marginRight: '10px' }} />
+                  <h2>{editingSharedPromptId ? 'Edit Shared Prompt' : 'Add Shared Prompt'}</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsAddSharedPromptModalOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="panel-content">
+                <div className="form-group">
+                  <label>Title</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Team Coding Standards"
+                    value={newSharedPrompt.title}
+                    onChange={e => setNewSharedPrompt({ ...newSharedPrompt, title: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Prompt Content</label>
+                  <textarea
+                    placeholder="Detailed prompt instructions for the team..."
+                    rows={8}
+                    value={newSharedPrompt.content}
+                    onChange={e => setNewSharedPrompt({ ...newSharedPrompt, content: e.target.value })}
+                  />
+                </div>
+
+                <div className="modal-actions">
+                  <button className="cancel-btn" onClick={() => setIsAddSharedPromptModalOpen(false)}>Cancel</button>
+                  <button className="save-rule-btn" onClick={() => {
+                    if (editingSharedPromptId) {
+                      handleUpdateSharedPrompt(editingSharedPromptId, newSharedPrompt)
+                    } else {
+                      handleAddSharedPrompt()
+                    }
+                  }}>
+                    {editingSharedPromptId ? 'Update Shared Prompt' : 'Save Shared Prompt'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

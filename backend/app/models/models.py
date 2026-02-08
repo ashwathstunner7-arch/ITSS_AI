@@ -60,3 +60,23 @@ class Rule(Base):
     version = Column(String(20), default="1.0")
     category = Column(String(100))
     priority = Column(String(20))
+
+class SavedPrompt(Base):
+    __tablename__ = "SAVED_PROMPTS"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255))
+    content = Column(Text)
+    user_id = Column(String(255), ForeignKey("USER.username"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class SharedPrompt(Base):
+    __tablename__ = "SHARED_PROMPTS"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255))
+    content = Column(Text)
+    created_by = Column(String(255)) # Admin username
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

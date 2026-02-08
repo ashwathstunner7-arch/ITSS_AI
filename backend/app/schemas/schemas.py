@@ -84,3 +84,43 @@ class InvokeRequest(BaseModel):
     provider: Optional[str] = "gemini"
     model: Optional[str] = None
     stream: Optional[bool] = False
+
+class SavedPromptBase(BaseModel):
+    title: str
+    content: str
+
+class SavedPromptCreate(SavedPromptBase):
+    pass
+
+class SavedPromptUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+class SavedPrompt(SavedPromptBase):
+    id: int
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class SharedPromptBase(BaseModel):
+    title: str
+    content: str
+
+class SharedPromptCreate(SharedPromptBase):
+    pass
+
+class SharedPromptUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+class SharedPrompt(SharedPromptBase):
+    id: int
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
