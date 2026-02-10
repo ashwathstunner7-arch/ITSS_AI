@@ -1,5 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
+import urllib.parse
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "ITSS AI"
@@ -10,12 +11,15 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "Aspire@2001")
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: str = os.getenv("DB_PORT", "3306")
-    DB_NAME: str = os.getenv("DB_NAME", "ai_user")
+    DB_NAME: str = os.getenv("DB_NAME", "AI_USER")
     
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
+    @property
+    def DATABASE_URL(self) -> str:
+        url = os.getenv("DATABASE_URL")
+        if url:
+            return url
+        encoded_password = urllib.parse.quote_plus(self.DB_PASSWORD)
+        return f"mysql+pymysql://{self.DB_USER}:{encoded_password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
     
     JWT_SECRET: str = os.getenv("JWT_SECRET", "supersecretkey")
     JWT_ALGORITHM: str = "HS256"

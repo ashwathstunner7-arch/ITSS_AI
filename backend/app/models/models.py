@@ -10,7 +10,10 @@ class User(Base):
     username = Column(String(255), unique=True, index=True)
     password = Column(String(255))
     status = Column(String(50), default="active")
-    ruleaccess = Column(String(255))
+    ruleaccess = Column(String(255), default="User") # Primary field for permissions (Super Admin, Admin, Sub-Admin, User)
+    parent_id = Column(Integer, ForeignKey("USER.id"), nullable=True)
+    license_limit = Column(Integer, default=0)
+    license_consumed = Column(Integer, default=0)
     phonenumber = Column(String(20))
     emailaddress = Column(String(255))
     state = Column(String(100))
@@ -20,6 +23,22 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     chats = relationship("Chat", back_populates="owner")
+    children = relationship("User", backref="parent", remote_side=[id])
+
+class LicenseRequest(Base):
+    __tablename__ = "license_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    requester_id = Column(Integer, ForeignKey("USER.id", ondelete="CASCADE"))
+    requester_username = Column(String(255))
+    approver_id = Column(Integer, ForeignKey("USER.id"), nullable=True)
+    approver_username = Column(String(255), nullable=True)
+    requested_amount = Column(Integer)
+    status = Column(String(50), default="pending") # pending, approved, rejected
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    requester = relationship("User", foreign_keys=[requester_id])
 
 class Chat(Base):
     __tablename__ = "chats"

@@ -89,7 +89,7 @@ class GeminiProvider(BaseAIProvider):
             response = chat.send_message(message_parts)
             return response.text
         except Exception as e:
-            return f"Gemini Error: {str(e)}"
+            raise e
 
     async def generate_stream(self, prompt: str, history: List[Dict[str, Any]] = None, model: str = None, attachments: List[Dict[str, Any]] = None):
         try:
@@ -143,7 +143,7 @@ class GeminiProvider(BaseAIProvider):
                 if chunk.text:
                     yield chunk.text
         except Exception as e:
-            yield f"Gemini Stream Error: {str(e)}"
+            raise e
 
 class OpenAIProvider(BaseAIProvider):
     def __init__(self):
@@ -187,7 +187,7 @@ class OpenAIProvider(BaseAIProvider):
             )
             return response.choices[0].message.content
         except Exception as e:
-            return f"OpenAI Error: {str(e)}"
+            raise e
 
     async def generate_stream(self, prompt: str, history: List[Dict[str, Any]] = None, model: str = None, attachments: List[Dict[str, Any]] = None):
         if not self.client:
@@ -225,7 +225,7 @@ class OpenAIProvider(BaseAIProvider):
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
         except Exception as e:
-            yield f"OpenAI Stream Error: {str(e)}"
+            raise e
 
 class AIService:
     def __init__(self):
@@ -239,7 +239,14 @@ class AIService:
         if not provider_instance:
             return f"Error: Provider '{provider}' not supported."
         
-        return await provider_instance.generate_response(prompt, history=history, model=model, attachments=attachments)
+        try:
+            return await provider_instance.generate_response(prompt, history=history, model=model, attachments=attachments)
+        except Exception as e:
+            error_msg = str(e).lower()
+            if provider.lower() == "openai" and ("insufficient_quota" in error_msg or "quota" in error_msg):
+                print(f"OpenAI Quota Exceeded. Falling back to Gemini.")
+                return await self.providers["gemini"].generate_response(prompt, history=history, attachments=attachments)
+            return f"{provider.capitalize()} Error: {str(e)}"
 
     async def generate_stream(self, prompt: str, provider: str = "gemini", model: str = None, history: List[dict] = None, attachments: List[Dict[str, Any]] = None):
         provider_instance = self.providers.get(provider.lower())
@@ -247,7 +254,18 @@ class AIService:
             yield f"Error: Provider '{provider}' not supported."
             return
         
-        async for chunk in provider_instance.generate_stream(prompt, history=history, model=model, attachments=attachments):
-            yield chunk
+        try:
+            # We use an async iterator to check the first chunk for immediate errors
+            generator = provider_instance.generate_stream(prompt, history=history, model=model, attachments=attachments)
+            async for chunk in generator:
+                yield chunk
+        except Exception as e:
+            error_msg = str(e).lower()
+            if provider.lower() == "openai" and ("insufficient_quota" in error_msg or "quota" in error_msg):
+                yield "\n\n[OpenAI Quota Exceeded. Automatically falling back to Gemini...]\n\n"
+                async for chunk in self.providers["gemini"].generate_stream(prompt, history=history, attachments=attachments):
+                    yield chunk
+            else:
+                yield f"{provider.capitalize()} Stream Error: {str(e)}"
 
 ai_service = AIService()

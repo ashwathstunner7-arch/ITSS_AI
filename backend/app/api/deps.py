@@ -28,9 +28,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     return user
 
 async def get_admin_user(current_user: models.User = Depends(get_current_user)):
-    if not current_user.ruleaccess or current_user.ruleaccess.lower() != "admin":
+    user_role = (current_user.ruleaccess or "").lower()
+    if user_role not in ["admin", "super admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="The user does not have enough privileges"
+        )
+    return current_user
+
+async def get_super_admin(current_user: models.User = Depends(get_current_user)):
+    user_role = (current_user.ruleaccess or "").lower()
+    if user_role != "super admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Super Admin is allowed to perform this action"
+        )
+    return current_user
+
+async def check_can_add_prompt(current_user: models.User = Depends(get_current_user)):
+    user_role = (current_user.ruleaccess or "").lower()
+    # Only Admin and Super Admin can add prompts (even in "My Prompts")
+    if user_role not in ["admin", "super admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is restricted from adding prompts"
         )
     return current_user

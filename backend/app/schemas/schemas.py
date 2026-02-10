@@ -124,3 +124,61 @@ class SharedPrompt(SharedPromptBase):
 
     class Config:
         from_attributes = True
+
+class UserBase(BaseModel):
+    id: Optional[int] = None
+    username: str
+    emailaddress: Optional[str] = None
+    phonenumber: Optional[str] = None
+    state: Optional[str] = None
+    address: Optional[str] = None
+    ruleaccess: str = "User"
+    status: str = "active"
+    license_limit: int = 0
+    license_consumed: int = 0
+    parent_id: Optional[int] = None
+    parent_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class UserCreate(UserBase):
+    password: str
+    parent_id: Optional[int] = None
+    license_limit: int = 0
+    savedpromptlimit: Optional[int] = 10
+
+class UserUpdate(BaseModel):
+    emailaddress: Optional[str] = None
+    phonenumber: Optional[str] = None
+    state: Optional[str] = None
+    address: Optional[str] = None
+    status: Optional[str] = None
+    ruleaccess: Optional[str] = None
+    license_limit: Optional[int] = None
+    password: Optional[str] = None
+    savedpromptlimit: Optional[int] = None
+
+class LicenseRequestBase(BaseModel):
+    requested_amount: int
+
+class LicenseRequestCreate(LicenseRequestBase):
+    pass
+
+class LicenseRequestUpdate(BaseModel):
+    status: str
+
+class LicenseRequest(LicenseRequestBase):
+    id: int
+    requester_id: int
+    requester_name: Optional[str] = None
+    requester_username: Optional[str] = None
+    approver_id: Optional[int] = None
+    approver_username: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

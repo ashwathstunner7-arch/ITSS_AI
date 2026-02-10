@@ -56,5 +56,8 @@ async def get_me(user: models.User = Depends(get_current_user)):
         "username": user.username,
         "status": user.status,
         "ruleaccess": user.ruleaccess,
-        "emailaddress": user.emailaddress
+        "emailaddress": user.emailaddress,
+        "license_limit": user.license_limit,
+        "license_consumed": user.license_consumed,
+        "parent_id": user.parent_id
     }

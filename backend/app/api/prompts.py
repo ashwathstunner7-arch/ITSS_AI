@@ -4,7 +4,7 @@ from typing import List
 from app.core.database import get_db
 from app.models import models
 from app.schemas import schemas
-from app.api.deps import get_current_user, get_admin_user
+from app.api.deps import get_current_user, get_admin_user, check_can_add_prompt
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ def get_my_prompts(
 def create_my_prompt(
     prompt: schemas.SavedPromptCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(check_can_add_prompt)
 ):
     # Check storage limit
     limit = current_user.savedpromptlimit or 10 # Default limit 10 if not set

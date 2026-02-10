@@ -36,7 +36,9 @@ import {
   Bookmark,
   Users,
   Star,
-  Search
+  Search,
+  Key,
+  UserCog
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import api from './services/api'
@@ -80,6 +82,10 @@ const storage = {
   }
 };
 
+const LicenseIcon = ({ size = 20 }) => (
+  <UserCog size={size} />
+)
+
 // Rename old App to Chatbot
 function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const [user, setUser] = useState(null)
@@ -117,6 +123,7 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const [isMobileHistoryOpen, setIsMobileHistoryOpen] = useState(false)
   const [isMyPromptsOpen, setIsMyPromptsOpen] = useState(false)
   const [isSharedPromptsOpen, setIsSharedPromptsOpen] = useState(false)
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false)
   const [myPrompts, setMyPrompts] = useState([])
   const [sharedPrompts, setSharedPrompts] = useState([])
   const [isAddPromptModalOpen, setIsAddPromptModalOpen] = useState(false)
@@ -131,11 +138,26 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
   const imageInputRef = useRef(null)
   const inputRef = useRef(null)
 
-  const [selectedModel, setSelectedModel] = useState({
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    provider: 'gemini'
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const saved = storage.get('selectedModel')
+    try {
+      return saved ? JSON.parse(saved) : {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash',
+        provider: 'gemini'
+      }
+    } catch (e) {
+      return {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash',
+        provider: 'gemini'
+      }
+    }
   })
+
+  useEffect(() => {
+    storage.set('selectedModel', JSON.stringify(selectedModel))
+  }, [selectedModel])
 
   const availableModels = [
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'gemini' },
@@ -438,6 +460,10 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
               fetchChats()
             }
           } else if (data.type === 'content') {
+            if (data.delta.includes('insufficient_quota') || data.delta.includes('exceeded your current quota')) {
+              alert("The AI provider (OpenAI) has run out of credits. Switching you to Gemini for this session.")
+              setSelectedModel({ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'gemini' })
+            }
             accumulatedContent += data.delta
             setMessages(prev => prev.map(m => m.id === tempBotId ? { ...m, content: accumulatedContent } : m))
           } else if (data.type === 'message_id') {
@@ -925,7 +951,7 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
             {isSidebarOpen && <span>New Chat</span>}
           </button>
 
-          <div className="sidebar-content">
+          <div className="sidebar-history">
             <div className="section-header-row">
               <div className="section-label">{isSidebarOpen && 'Recent Chats'}</div>
               {isSidebarOpen && conversations.length > 0 && (
@@ -989,13 +1015,17 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                 </React.Fragment>
               ))}
             </div>
+          </div>
 
+          <div className="sidebar-tools">
             <div className="section-label">{isSidebarOpen && 'Tools'}</div>
             <div className="conversations-list">
-              <div className={`conv-item ${isRulesPanelOpen ? 'active' : ''}`} onClick={() => setIsRulesPanelOpen(true)}>
-                <Layout size={16} />
-                {isSidebarOpen && <span>Rule Management</span>}
-              </div>
+              {user && user.ruleaccess?.toLowerCase() !== 'user' && (
+                <div className={`conv-item ${isRulesPanelOpen ? 'active' : ''}`} onClick={() => setIsRulesPanelOpen(true)}>
+                  <Layout size={16} />
+                  {isSidebarOpen && <span>Rule Management</span>}
+                </div>
+              )}
               <div className={`conv-item ${isMyPromptsOpen ? 'active' : ''}`} onClick={() => setIsMyPromptsOpen(true)}>
                 <Bookmark size={16} />
                 {isSidebarOpen && <span>My Prompts</span>}
@@ -1004,6 +1034,13 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                 <Users size={16} />
                 {isSidebarOpen && <span>Shared Prompts</span>}
               </div>
+              {!isMobile && !isPluginMode && user && user.ruleaccess?.toLowerCase() !== 'user' && (
+                <div className={`conv-item ${isUserManagementOpen ? 'active' : ''}`} onClick={() => setIsUserManagementOpen(true)}>
+                  <LicenseIcon size={18} />
+                  {isSidebarOpen && <span>User & License Management</span>}
+                </div>
+              )}
+
             </div>
           </div>
 
@@ -1148,6 +1185,8 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
                     </button>
                   </div>
                 )}
+
+
               </div>
             )}
             {/* Icons removed as per user request */}
@@ -1939,6 +1978,64 @@ function Chatbot({ isMobile, setIsMobile, isPluginMode, setIsPluginMode }) {
         )
       }
 
+      {/* User & License Management Panel Overlay */}
+      {
+        isUserManagementOpen && (
+          <div className="panel-overlay" onClick={() => setIsUserManagementOpen(false)}>
+            <div className="rules-panel management-panel glass fade-in" onClick={e => e.stopPropagation()} style={{ maxWidth: '1400px' }}>
+              <div className="panel-header">
+                <div className="header-title">
+                  <UserCog size={24} style={{ marginRight: '10px' }} />
+                  <h2>User & License Management</h2>
+                </div>
+                <button className="close-btn" onClick={() => setIsUserManagementOpen(false)}>
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="panel-content management-grid">
+                {/* Stats Header */}
+                <div className="management-stats">
+                  <div className="stat-card glass premium">
+                    <div className="stat-icon-wrapper users">
+                      <Users size={20} />
+                    </div>
+                    <div className="stat-label">Total Licenses</div>
+                    <div className="stat-value">{user?.license_limit || 0}</div>
+                  </div>
+                  <div className="stat-card glass premium">
+                    <div className="stat-icon-wrapper used">
+                      <ShieldCheck size={20} />
+                    </div>
+                    <div className="stat-label">Allocated/Used</div>
+                    <div className="stat-value">{user?.license_consumed || 0}</div>
+                  </div>
+                  <div className="stat-card glass premium">
+                    <div className="stat-icon-wrapper remaining">
+                      <Key size={20} />
+                    </div>
+                    <div className="stat-label">Remaining</div>
+                    <div className="stat-value">{(user?.license_limit || 0) - (user?.license_consumed || 0)}</div>
+                  </div>
+                </div>
+
+                <div className="management-sections">
+                  {/* User Creation & List */}
+                  <div className="management-section">
+                    <h3>Hierarchy ({user?.ruleaccess})</h3>
+                    <UserManagementContent
+                      user={user}
+                      fetchUserData={fetchUserData}
+                      onClose={() => setIsUserManagementOpen(false)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
       {/* Mobile/Plugin History Drawer - Refined Sliding Drawer */}
       {
         isMobileHistoryOpen && (isMobile || isPluginMode) && (
@@ -2154,6 +2251,393 @@ function App() {
         <div id="app-initialized-marker" style={{ display: 'none' }}>ready</div>
       </div>
     </ErrorBoundary>
+  )
+}
+
+const UserManagementContent = ({ user, onClose, fetchUserData }) => {
+  const [managedUsers, setManagedUsers] = useState([])
+  const [requests, setRequests] = useState([])
+  const [view, setView] = useState(user?.ruleaccess?.toLowerCase() === 'user' ? 'my-requests' : 'users')
+  const [editingUser, setEditingUser] = useState(null)
+  const [newUser, setNewUser] = useState({
+    username: '',
+    password: '',
+    emailaddress: '',
+    phonenumber: '',
+    state: '',
+    address: '',
+    ruleaccess: 'User',
+    license_limit: 0
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [requestAmount, setRequestAmount] = useState(10)
+
+  useEffect(() => {
+    fetchUsers()
+    if (user?.ruleaccess?.toLowerCase() === 'super admin' || user?.ruleaccess?.toLowerCase() === 'admin') {
+      fetchRequests()
+    }
+  }, [])
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/tenant/users')
+      setManagedUsers(response.data)
+    } catch (error) {
+      console.error("Failed to fetch users:", error)
+    }
+  }
+
+  const handleDeleteUser = async (user_id) => {
+    if (!window.confirm("Are you sure you want to delete this user? All allocated licenses will be returned to your pool.")) return
+
+    // Optimistic Update
+    const previousUsers = [...managedUsers]
+    setManagedUsers(managedUsers.filter(u => u.id !== user_id))
+
+    try {
+      await api.delete(`/tenant/users/${user_id}`)
+      if (typeof fetchUserData === 'function') fetchUserData()
+      fetchUsers() // Refresh local list
+    } catch (error) {
+      setManagedUsers(previousUsers) // Revert on failure
+      const detail = error.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : JSON.stringify(detail)
+      alert(msg || "Failed to delete user")
+    }
+  }
+
+  const handleToggleStatus = async (user_to_toggle) => {
+    const newStatus = user_to_toggle.status === 'active' ? 'inactive' : 'active'
+
+    // Optimistic Update
+    const previousUsers = [...managedUsers]
+    setManagedUsers(managedUsers.map(u =>
+      u.id === user_to_toggle.id ? { ...u, status: newStatus } : u
+    ))
+
+    try {
+      await api.patch(`/tenant/users/${user_to_toggle.id}`, { status: newStatus })
+    } catch (error) {
+      setManagedUsers(previousUsers) // Revert on failure
+      console.error("Failed to toggle status:", error)
+    }
+  }
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return
+    setIsSubmitting(true)
+    try {
+      // Send fields allowed by UserUpdate schema
+      const updateData = {
+        emailaddress: editingUser.emailaddress,
+        phonenumber: editingUser.phonenumber,
+        state: editingUser.state,
+        address: editingUser.address,
+        status: editingUser.status,
+        ruleaccess: editingUser.ruleaccess,
+        license_limit: editingUser.license_limit,
+        password: editingUser.password || undefined // Only send if changed
+      }
+      await api.patch(`/tenant/users/${editingUser.id}`, updateData)
+      setEditingUser(null)
+      fetchUsers()
+      if (typeof fetchUserData === 'function') fetchUserData()
+    } catch (error) {
+      const detail = error.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : JSON.stringify(detail)
+      alert(msg || "Failed to update user")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const fetchRequests = async () => {
+    try {
+      const response = await api.get('/tenant/licenses/requests')
+      setRequests(response.data)
+    } catch (error) {
+      console.error("Failed to fetch requests:", error)
+    }
+  }
+
+  const handleRequestLicenses = async () => {
+    setIsSubmitting(true)
+    try {
+      await api.post('/tenant/licenses/request', { requested_amount: requestAmount })
+      alert("Request submitted successfully")
+      fetchRequests()
+    } catch (error) {
+      const detail = error.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : JSON.stringify(detail)
+      alert(msg || "Failed to submit request")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleCreateUser = async () => {
+    if (!newUser.username || !newUser.password) return
+    setIsSubmitting(true)
+    try {
+      await api.post('/tenant/users', newUser)
+      setNewUser({
+        username: '',
+        password: '',
+        emailaddress: '',
+        phonenumber: '',
+        state: '',
+        address: '',
+        ruleaccess: 'User',
+        license_limit: 0
+      })
+      setView('users')
+      fetchUsers()
+      if (typeof fetchUserData === 'function') fetchUserData()
+    } catch (error) {
+      const detail = error.response?.data?.detail
+      const msg = typeof detail === 'string' ? detail : JSON.stringify(detail)
+      alert(msg || "Failed to create user")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleProcessRequest = async (id, status) => {
+    try {
+      await api.patch(`/tenant/licenses/requests/${id}`, { status })
+      fetchRequests()
+      if (typeof fetchUserData === 'function') fetchUserData()
+    } catch (error) {
+      console.error("Failed to process request:", error)
+    }
+  }
+
+  return (
+    <div className="management-container">
+      <div className="management-tabs">
+        {user?.ruleaccess?.toLowerCase() !== 'user' && (
+          <button className={`tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>Users</button>
+        )}
+        {user?.ruleaccess?.toLowerCase() !== 'user' && (
+          <button className={`tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>Add Entity</button>
+        )}
+        {(user?.ruleaccess?.toLowerCase() === 'super admin' || user?.ruleaccess?.toLowerCase() === 'admin') && (
+          <button className={`tab ${view === 'requests' ? 'active' : ''}`} onClick={() => setView('requests')}>
+            Requests {requests.filter(r => r.status === 'pending').length > 0 && <span className="badge">{requests.filter(r => r.status === 'pending').length}</span>}
+          </button>
+        )}
+        {user?.ruleaccess?.toLowerCase() === 'admin' && (
+          <button className={`tab ${view === 'my-requests' ? 'active' : ''}`} onClick={() => setView('my-requests')}>My Requests</button>
+        )}
+      </div>
+
+      <div className="tab-content">
+        {view === 'users' && (
+          <div className="user-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Access</th>
+                  <th>Parent</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Licenses</th>
+                  <th>Created</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {managedUsers.map(u => (
+                  <tr key={u.id || u.username}>
+                    <td>{u.username}</td>
+                    <td><span className={`role-tag ${u.ruleaccess}`}>{u.ruleaccess}</span></td>
+                    <td>{u.parent_name || 'System'}</td>
+                    <td>{u.emailaddress || '-'}</td>
+                    <td>{u.phonenumber || '-'}</td>
+                    <td>{u.license_limit || '-'}</td>
+                    <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}</td>
+                    <td>
+                      <span
+                        className={`status-pill ${u.status}`}
+                        onClick={() => handleToggleStatus(u)}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to toggle status"
+                      >
+                        {u.status}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="action-btns">
+                        <button className="mini-action-btn" onClick={() => setEditingUser(u)} title="Edit User">
+                          <Edit2 size={14} />
+                        </button>
+                        <button className="mini-action-btn delete" onClick={() => handleDeleteUser(u.id)} title="Delete User">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {managedUsers.length === 0 && (
+                  <tr>
+                    <td colSpan="4" style={{ textAlign: 'center', padding: '20px' }}>No users found in your hierarchy.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {view === 'create' && (
+          <div className="create-form glass">
+            <div className="form-group">
+              <label>Username</label>
+              <input value={newUser.username} onChange={e => setNewUser({ ...newUser, username: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Password</label>
+              <input type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Email</label>
+              <input value={newUser.emailaddress} onChange={e => setNewUser({ ...newUser, emailaddress: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Phone Number</label>
+              <input value={newUser.phonenumber} onChange={e => setNewUser({ ...newUser, phonenumber: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>State</label>
+              <input value={newUser.state} onChange={e => setNewUser({ ...newUser, state: e.target.value })} />
+            </div>
+            <div className="form-group">
+              <label>Address</label>
+              <textarea value={newUser.address} onChange={e => setNewUser({ ...newUser, address: e.target.value })} rows={2} style={{ resize: 'none' }} />
+            </div>
+            <div className="form-group">
+              <label>Access Role</label>
+              <select value={newUser.ruleaccess} onChange={e => setNewUser({ ...newUser, ruleaccess: e.target.value })}>
+                <option value="User">User</option>
+                {user?.ruleaccess?.toLowerCase() === 'super admin' && (
+                  <>
+                    <option value="Super Admin">Super Admin</option>
+                    <option value="Admin">Admin</option>
+                  </>
+                )}
+                {user?.ruleaccess?.toLowerCase() === 'admin' && <option value="Admin">Admin</option>}
+              </select>
+            </div>
+            {newUser.ruleaccess !== 'User' && (
+              <div className="form-group">
+                <label>Initial License Allocation</label>
+                <input type="number" value={newUser.license_limit} onChange={e => setNewUser({ ...newUser, license_limit: parseInt(e.target.value) || 0 })} />
+              </div>
+            )}
+            <button className="save-rule-btn" onClick={handleCreateUser} disabled={isSubmitting}>
+              {isSubmitting ? 'Creating...' : 'Create Entity'}
+            </button>
+          </div>
+        )}
+
+        {view === 'requests' && (
+          <div className="request-list">
+            <h3>Pending Requests from Sub-Users</h3>
+            {requests.length === 0 && <p className="empty-msg">No license requests found.</p>}
+            {requests.map(req => (
+              <div key={req.id} className="request-card glass">
+                <div className="req-info">
+                  <strong>User: {req.requester_name || req.requester_id}</strong>
+                  <span>Amount: {req.requested_amount}</span>
+                  <span className={`status-badge ${req.status}`}>{req.status}</span>
+                  {req.approver_name && (
+                    <span className="approver-info">Approver: {req.approver_name}</span>
+                  )}
+                </div>
+                {req.status === 'pending' && (
+                  <div className="req-actions">
+                    <button className="mini-action-btn success" onClick={() => handleProcessRequest(req.id, 'approved')}>
+                      <Check size={14} />
+                    </button>
+                    <button className="mini-action-btn delete" onClick={() => handleProcessRequest(req.id, 'rejected')}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {view === 'my-requests' && (
+          <div className="create-form glass">
+            <h3>Request Upgrade / Licenses</h3>
+            <div className="form-group">
+              <label>Amount to Request</label>
+              <input type="number" value={requestAmount} onChange={e => setRequestAmount(parseInt(e.target.value) || 0)} min="1" />
+            </div>
+            <button className="save-rule-btn" onClick={handleRequestLicenses} disabled={isSubmitting}>
+              {isSubmitting ? 'Submitting...' : 'Submit Request'}
+            </button>
+          </div>
+        )}
+        {editingUser && (
+          <div className="edit-overlay" onClick={() => setEditingUser(null)}>
+            <div className="create-form glass edit-modal" onClick={e => e.stopPropagation()}>
+              <h3>Edit User: {editingUser.username}</h3>
+              <div className="form-group">
+                <label>Email</label>
+                <input value={editingUser.emailaddress || ''} onChange={e => setEditingUser({ ...editingUser, emailaddress: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Phone</label>
+                <input value={editingUser.phonenumber || ''} onChange={e => setEditingUser({ ...editingUser, phonenumber: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>State</label>
+                <input value={editingUser.state || ''} onChange={e => setEditingUser({ ...editingUser, state: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>License Limit</label>
+                <input type="number" value={editingUser.license_limit || 0} onChange={e => setEditingUser({ ...editingUser, license_limit: parseInt(e.target.value) || 0 })} />
+              </div>
+              <div className="form-group">
+                <label>Access Role</label>
+                <select value={editingUser.ruleaccess} onChange={e => setEditingUser({ ...editingUser, ruleaccess: e.target.value })}>
+                  <option value="User">User</option>
+                  {user?.ruleaccess?.toLowerCase() === 'super admin' && (
+                    <>
+                      <option value="Super Admin">Super Admin</option>
+                      <option value="Admin">Admin</option>
+                    </>
+                  )}
+                  {user?.ruleaccess?.toLowerCase() === 'admin' && <option value="Admin">Admin</option>}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Status</label>
+                <select value={editingUser.status} onChange={e => setEditingUser({ ...editingUser, status: e.target.value })}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Reset Password (Optional)</label>
+                <input type="password" placeholder="Leave blank to keep current" onChange={e => setEditingUser({ ...editingUser, password: e.target.value })} />
+              </div>
+              <div className="modal-actions">
+                <button className="save-rule-btn" onClick={handleUpdateUser} disabled={isSubmitting}>
+                  {isSubmitting ? 'Saving...' : 'Save Changes'}
+                </button>
+                <button className="cancel-btn" onClick={() => setEditingUser(null)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
